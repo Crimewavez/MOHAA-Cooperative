@@ -19,13 +19,6 @@ Discord server is used only for community purposes and gathering playtesters / p
 - Medal of Honor: Allied Assault War Chest - [GOG edition](https://www.gog.com/game/medal_of_honor_allied_assault_war_chest) (supported out of the box) or retail
 - Optionally, [OpenMoHAA](https://github.com/openmoh/openmohaa) (open-source source port)
 
-## Installation
-
-1. Install MoHAA War Chest (GOG) or set up [OpenMoHAA](https://github.com/openmoh/openmohaa).
-2. Download the latest release from [Releases](https://github.com/Crimewavez/mohaa-cooperative/releases) (or clone this repository).
-3. Pack the mod folder into `zzzzzz_coop_mohaa.pk3` using [7-Zip](https://7-zip.org) or similar.
-4. Place the `.pk3` file into the appropriate game directory (e.g., `main/` or `maintt/` depending on the campaign).
-
 ## Server
 
 ```
