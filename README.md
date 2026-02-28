@@ -2,10 +2,11 @@
 
 [![Discord](https://img.shields.io/discord/1344795200907403335?logo=discord&label=Discord&color=5865F2)](https://discord.gg/SA2scfnXUJ)
 
-A cooperative gameplay mod for Medal of Honor: Allied Assault.
+A cooperative gameplay mod for Medal of Honor: Allied Assault and OpenMOHAA.
 
 Play through the singleplayer campaigns of Allied Assault, Spearhead, and Breakthrough together with friends.
 
+Discord server is used only for community purposes and gathering playtesters / players to play in group. It is NOT for: development talk, coop bug reports. Use discussions and Issues.
 
 ## Planned Features
 
@@ -24,7 +25,6 @@ Play through the singleplayer campaigns of Allied Assault, Spearhead, and Breakt
 2. Download the latest release from [Releases](https://github.com/Crimewavez/mohaa-cooperative/releases) (or clone this repository).
 3. Pack the mod folder into `zzzzzz_coop_mohaa.pk3` using [7-Zip](https://7-zip.org) or similar.
 4. Place the `.pk3` file into the appropriate game directory (e.g., `main/` or `maintt/` depending on the campaign).
-5. Launch the game → Multiplayer → Start Game → select the Coop mod.
 
 ## Server
 
