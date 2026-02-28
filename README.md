@@ -16,7 +16,7 @@ Discord server is used only for community purposes and gathering playtesters / p
 
 ## Requirements
 
-- Medal of Honor: Allied Assault War Chest — [GOG edition](https://www.gog.com/game/medal_of_honor_allied_assault_war_chest) (supported out of the box) or retail
+- Medal of Honor: Allied Assault War Chest - [GOG edition](https://www.gog.com/game/medal_of_honor_allied_assault_war_chest) (supported out of the box) or retail
 - Optionally, [OpenMoHAA](https://github.com/openmoh/openmohaa) (open-source source port)
 
 ## Installation
