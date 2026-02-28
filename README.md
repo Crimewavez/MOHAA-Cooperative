@@ -6,7 +6,7 @@ A cooperative gameplay mod for Medal of Honor: Allied Assault and OpenMOHAA.
 
 Play through the singleplayer campaigns of Allied Assault, Spearhead, and Breakthrough together with friends.
 
-Discord server is used only for community purposes and gathering playtesters / players to play in group. It is NOT for: development talk, coop bug reports. Use discussions and Issues.
+Discord server is used only for community purposes and gathering playtesters / players to play in group. It is NOT for: development talk, coop bug reports. Use Github discussions and Issues for these.
 
 ## Planned Features
 
