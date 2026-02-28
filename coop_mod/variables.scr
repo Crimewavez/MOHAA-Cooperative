@@ -1,0 +1,241 @@
+//////////////////////////////////////////////
+// started by chrissstrahl on 2020.10.16 ([202])
+// 
+// Contains global and level vars used by the coop mod
+//
+//////////////////////////////////////////////
+
+//This is executed at the erliest stage from main.scr::main
+//should be run in a single frame
+//=========================================================================
+main:{
+//=========================================================================
+if(level.cMTE_coop_variables){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread variables/main->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	game.ms 	= 0.0005 			//[200] Smithy - the shortest wait the game will allow (translates to 1ms)
+	game.true 	= bool 1 			//[200] Smithy - nice boolean handling. will be better for engine and me.
+	game.false 	= !game.true
+	game.frame	= 1.0 / int(getcvar("sv_fps"))		//[202] Smithy - fixed //[202] chrissstrahl - could not get this to read sv_fps and calculate 1/sv_fps
+	
+	//common method name variables
+	game.replace = "coop_mod/replace.scr" 					//[202] Smithy - easier reference to replace.scr
+	game.main = "coop_mod/main.scr" 						//[202] Smithy - easier reference to main.scr
+	game.item = "coop_mod/itemhandler.scr" 					//[202] Smithy - you get the point
+	game.ai = "coop_mod/aihandler.scr" 						//[202] Smithy - ^
+	game.playerActive = coop_mod/main.scr::isPlayerActive	//[202] Smithy - i can see me using this more
+	game.say = coop_mod/replace.scr::say_wait 				//[202] Smithy
+	game.waittill = coop_mod/eventsystem.scr::waitTillEvent //[202] Smithy
+	game.event = coop_mod/eventsystem.scr::doEvent 			//[202] Smithy
+	game.waittill2 = coop_mod/eventsystem.scr::waittill 	//[202] Smithy
+	game.attackplayer = game.replace::attackplayer 
+	game.player = "coop_mod/player.scr" 	
+	game.soundwait = game.replace::playsound_wait
+	game.saywait = game.replace::say_wait
+	
+	level.gametype						= int(getCvar("g_gametype"))		//[200] chrissstrahl - have the coop mod set it just to have it work always
+	
+	//[203] chrissstrahl - set length of auth-token, number of letters and number of a single auth token, : is always prefixed
+	//the longer the token the harder to hack
+	//the longer the token the less keys fit in the cvar
+	level.coop_authTokenLenth			= 6
+	
+	//[203] chrissstrahl - set number of auth-tokens for auto dev login - this gets saved to cvar so mind your length
+	//so if level.coop_authTokenLenth is 6 you get a 7 char long token because : is prefixed
+	//1 admin = 1 token, 4 tokens allowes 4 admins to get a relogin token while all 4 are connected
+	level.coop_authTokens				= 4
+	
+	//[203] chrissstrahl - changed cuz dedicated is not a native cvar here - delivered by SmithysPizzaService
+	level.coop_dedicated                = !(int(getCvar("cl_running")))
+	level.coop_dedicated                = level.coop_dedicated || int(getCvar("dedicated"))
+	level.coop_dedicated                = level.coop_dedicated || int(getCvar("ui_dedicated"))
+	
+	level.coop_svmaxclients				= int(getcvar("sv_maxclients"))	
+	level.coop_cvarRespawnDisable		= int(getcvar("coop_disRespawnWarp"))	//[202][hotfix] chrissstrahl - option to disable respawning
+	level.coop_debugSpawn				= 0									//show (1) spawnlocations or not (0)
+	level.coop_playerReady				= 0									//player(s) are not ready/not joined
+	level.coop_disableSpawnWarper 		= game.false						//[200] chrissstrahl - moved here for inizialisation
+	level.coop_gametypeHackOn			= 0			//[200] chrissstrahl - used to keep track when some script commands are executed that require the gametype to be set to Singleplayer
+	level.coop_gameStartedAt			= NIL		//[200] chrissstrahl - used to keep track when the first player was actually active
+	level.coop_lmsAllowJoin				= 1			//[200] chrissstrahl - allow players who just enter the game to join in in lms (once any player leaves server this will be 0)
+	level.coop_lmsLives					= 0			//[201] chrissstrahl - fixed typo //[200] chrissstrahl - number of lives players have in LMS
+	level.coop_musicCommandVol			= NIL
+	level.coop_musicCommand				= NIL
+	level.coop_mapname					= thread coop_mod/main.scr::getCleanMapname (getcvar("mapname")) //[202] chrissstrahl - get current mapname from cvar have it cleaned and available
+	
+	if(level.script						== NIL){ level.script	= "maps/"+level.coop_mapname+".scr" } //used to set current map script (used frequently)
+	if(level.coop_inJeep				== NIL){ level.coop_inJeep					= 0 }		//used to check if player should be in jeep or not
+	if(level.coop_playerGlueIndividual	== NIL){ level.coop_playerGlueIndividual	= 0 }		//used for replacement of $player glue (individual spots)
+	if(level.coop_playerGlue			== NIL){ level.coop_playerGlue				= 0 }		//used for replacement of $player glue (glue is active)
+	if(level.coop_playerHide			== NIL){ level.coop_playerHide				= 0 }		//used for replacement of $player hide
+	if(level.coop_player				== NIL){ level.coop_player					= NULL }	//follow player for gloabal/fiendly.scr, Since [204] also squad.scr
+	if(level.coop_playerTank			== NIL){ level.coop_playerTank				= NULL }	//tank driving player for gloabal/vehicles_thinkers.scr
+	if(level.enemyhealthscalar			== NIL){ level.enemyhealthscalar			= 1 }		//health scaler - used in global/spawner.scr
+	if(level.coop_noWeapon				== NIL){ level.coop_noWeapon				= 0 }		//specifies if players should have no weapons
+	if(level.coop_threatbias			== NIL){ level.coop_threatbias				= 10 }		//specifies how badly the enemy considers the player a problem
+	if(level.coop_aaMap					== NIL){ level.coop_aaMap					= 0 }		//sets a map to be handles like in aa
+	if(level.coop_prespawn				== NIL){ level.coop_prespawn				= 1 }		//used for replace.scr::waitTillPrespawn
+	if(level.coopMedicHealth			== NIL){ level.coopMedicHealth				= 1000 }	//sets medic AI health
+	
+	waitthread coop_mod/sound.scr::start //[203] Smithy
+	
+	//[202] chrissstrahl - don't populate these vars in singleplayer
+	//pretty sure there are more vars that should go below this line but we haven't got the time to sort them out
+	if(level.gametype == 0){ end }
+	
+    //[200] Smithy - used in coop_mod/aihandler.scr
+    level.coop_actorArray["german"][1]      = NIL
+    level.coop_actorArray["american"][1]    = NIL
+	
+    //if you wish to modify this later on, use 'exec coop_mod/aihandler.scr::updateTeamRunSpeed <team> <speed>'
+    level.coop_aaRunSpeed["american"]       = 0.75  			//75% of SH/BT run speed - do not touch, managed in func ::updateTeamRunSpeed
+    level.coop_maxPlayerScalar              = 4     			//after this number of players, stop scaling difficulty (lower number means steeper difficulty scaling)
+    level.coop_actorAccuracyCalcs           = game.true     	//do dynamic enemy accuracy calculations for difficulty
+    level.coop_actorPainHandler             = game.true     	//use coop method of handling pain
+
+    //list of maps to exclude from custom pain handler
+    //disguise maps should be excluded, as when in disguise the engine doesn't call pain.scr
+    //omaha is excluded because it is heavily scripted with its own pain events for AI
+	//[202] chrissstrahl - added easy lazy fix test for painhandler crash in e2l1 @smithy @chrissstrahl yo bitches don't you dare think it is fixed
+    level.coop_painHandlerExclusions 		= "m3l1a"::"m2l2a"::"m2l2b"::"m6l1c"::"e1l1"::"e1l3"::"e1l4"::"e2l1"
+    															//you can exclude entire games from this by using first char and wildcard *
+    															//e.g to exclude all BT maps add "e*" to list
+    //[200] Smithy - used in coop_mod/itemhandler.scr
+    level.coop_itemHandler					= game.true		//use the coop item handler
+    level.coop_healthDropFreq 				= 5 			//every num of axis deaths drop a health kit (5 is default engine behavior)
+    level.coop_healthRespawnTime 			= 30 			//respawn time (seconds) for world (bsp or script) health items
+	level.coop_ammoRespawnTime 				= 30 			//respawn time (seconds) for world (bsp or script) weapon and ammo items
+	level.coop_retainInventory 				= game.true 	//keep all weapons from previous life
+	level.coop_disableHealthItems 			= game.false	//disable all health items except for enemy drops and scripted items (those with targetnames)
+	level.coop_disableAmmoItems 			= game.false 	//disable all ammo items except for scripted items (those with targetnames)
+	level.coop_changeGameTypeDebug 			= game.false 	//[200] Smithy - whether or not to print debug info for changeGameType func //[204]chrissstrahl - disabled because it worked flawlessly so far
+	
+	//[200] Smithy - nicer to have console variables stored in same place 	
+	level.coop_cvars["developer"] = int(getcvar "developer") 		
+	level.coop_cvars["coop_prevMapList"] = string(getcvar "coop_prevMapList")	//[200] Smithy - so we can reset the sv_maplist cvar is it's populated
+	
+	waitthread coop_mod/maplist.scr::main			//[201] Smithy - populates the mapList array //[202] chrissstrahl - moved back to critical vars area, because server.scr::coop_checkMaps won't work right
+	
+	//[202] chrissstrahl - execute non critical vars in the next frame
+	thread initNonCritical
+}end
+
+//[205] chrissstrahl - used by MOM Developer/Admin/Fov and other special commands
+//=========================================================================
+getNameAppendCommands:{
+//=========================================================================
+	local.command["0"]=" ,0" //coop version
+	local.command["1"]=" ,1" //fov NOTE
+	local.command["2"]=" ,2" //teleport
+	local.command["3"]=" ,3" //developer commands
+	local.command["4"]=" ,stuck" //developer commands
+	local.command["5"]=" ,5" //developer login key
+	local.command["6"]=" ,6" //admin commands
+}end local.command
+
+//This is executed at the erliest stage from main.scr::main
+//=========================================================================
+initNonCritical:{
+//=========================================================================
+if(level.cMTE_coop_variables){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread variables/initNonCritical->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	waitframe
+	
+	//[200] Smithy - initialise the mission names and their descriptions
+	thread initMissionNames
+	
+	//[202] chrissstrahl - store all the objects we don't want to solidifify in upon spawn
+	thread levelObstacleArrays
+}end
+
+//[200] Smithy - used for scoreboard - can be used for other stuff if needed
+// - added briefing dir to relevant map names
+//=========================================================================
+initMissionNames:{
+//=========================================================================
+if(level.cMTE_coop_variables){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread variables/initMissionNames->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	level.coop_mapDescription["training"]			= "Training Camp"
+	level.coop_mapDescription["m4l0"]				= "Secret Dog Map"
+	level.coop_mapDescription["briefing/briefing1"] = "Lighting the Torch"
+	level.coop_mapDescription["m1l1"] 				= "Rangers Lead the Way"
+	level.coop_mapDescription["m1l2a"] 				= "The Rescue Mission"
+	level.coop_mapDescription["m1l2b"] 				= "Sabotage the Motorpool"
+	level.coop_mapDescription["m1l3a"] 				= "Desert Road"
+	level.coop_mapDescription["m1l3b"] 				= "Grounding the Airfield"
+	level.coop_mapDescription["m1l3c"] 				= "Lighthouse"
+	level.coop_mapDescription["briefing/briefing2"] = "Scuttling the U-529"
+	level.coop_mapDescription["m2l1"] 				= "Secret Documents of the Kriegsmarine"
+	level.coop_mapDescription["m2l2a"] 				= "Naxos Prototype"
+	level.coop_mapDescription["m2l2b"] 				= "Inside the U-529"
+	level.coop_mapDescription["m2l2c"] 				= "Cover Blown"
+	level.coop_mapDescription["m2l3"] 				= "Escape from Trondheim"
+	level.coop_mapDescription["briefing/briefing3"] = "Operation Overlord"
+	level.coop_mapDescription["m3l1a"] 				= "Omaha Beach - The Landing"
+	level.coop_mapDescription["m3l1b"] 				= "Omaha Beach - Inside the Bunker"
+	level.coop_mapDescription["m3l2"] 				= "Battle in the Bocage"
+	level.coop_mapDescription["m3l3"] 				= "The Nebelwerfer Hunt"
+	level.coop_mapDescription["briefing/briefing4"] = "Behind Enemy Lines"
+	level.coop_mapDescription["m4l1"] 				= "Rendezvous with the Resistance"
+	level.coop_mapDescription["m4l2"] 				= "Diverting the Enemy"
+	level.coop_mapDescription["m4l3"] 				= "The Command Post"
+	level.coop_mapDescription["briefing/briefing5"] = "Day of the Tiger"
+	level.coop_mapDescription["m5l1a"] 				= "Sniper's Last Stand - Outskirts"
+	level.coop_mapDescription["m5l1b"] 				= "Sniper's Last Stand - City Hall"
+	level.coop_mapDescription["special"] 			= "Bazooka-Med"
+	level.coop_mapDescription["m5l2a"] 				= "The Hunt for the King Tiger - Destroyed Village"
+	level.coop_mapDescription["m5l2b"] 				= "The Hunt for the King Tiger - Country Road"
+	level.coop_mapDescription["m5l3"] 				= "The Bridge"
+	level.coop_mapDescription["briefing/briefing6"] = "The Return to Schmerzen"
+	level.coop_mapDescription["m6l1a"] 				= "The Siegfried Forest - Flak Guns"
+	level.coop_mapDescription["m6l1b"] 				= "The Siegfried Forest - Bunker Hill"
+	level.coop_mapDescription["m6l1c"] 				= "Das Sturmgewehr" //[200] chrissstrahl - Bad Article, it is "Das" not "Die"
+	level.coop_mapDescription["m6l2a"] 				= "The Communications Blackout"
+	level.coop_mapDescription["m6l2b"] 				= "The Schmerzen Express"
+	level.coop_mapDescription["m6l3a"] 				= "Storming Fort Schmerzen - Train Platform" //[200] Smithy - removed brackets for consistency
+	level.coop_mapDescription["m6l3b"] 				= "Storming Fort Schmerzen - Inner Facility"
+	level.coop_mapDescription["m6l3c"] 				= "Storming Fort Schmerzen - Chemical Plant"
+	level.coop_mapDescription["m6l3d"] 				= "Storming Fort Schmerzen - Final Run"
+	level.coop_mapDescription["m6l3e"] 				= "Storming Fort Schmerzen - Conclusion"
+	
+	//[200] chrissstrahl - added BT
+	//Should have a maxlength of 81 or it is cut off in scoreboard
+	//[200] Smithy - added 'Part' as it will look better on scoreboard
+	level.coop_mapDescription["e1l1"] = "Battle of Kasserine Pass - Part 1" 
+	level.coop_mapDescription["e1l2"] = "Battle of Kasserine Pass - Part 2"
+	level.coop_mapDescription["e1l3"] = "Operation Torch - Bizerte Fort"
+	level.coop_mapDescription["e1l4"] = "Operation Torch - Bizerte Harbor"
+	level.coop_mapDescription["e2l1"] = "Sicily"
+	level.coop_mapDescription["e2l2"] = "Operation Husky - Caltagirone"
+	level.coop_mapDescription["e2l3"] = "Operation Husky - Gela"
+	level.coop_mapDescription["e3l1"] = "Invasion of Monte Cassino - Part 1"
+	level.coop_mapDescription["e3l2"] = "Invasion of Monte Cassino - Part 2"
+	level.coop_mapDescription["e3l3"] = "Battle of Anzio"
+	level.coop_mapDescription["e3l4"] = "Battle of Monte Battaglia"
+}end
+
+//[202] chrissstrahl
+//contains names of level objects that a player might spawn in and could get stuck
+//if a player is inside that, we don't want him to become solid
+//=========================================================================
+levelObstacleArrays:{
+//=========================================================================
+if(level.cMTE_coop_variables){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread variables/levelObstacleArrays->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+//general objects
+	local.levelObstacle = makeArray
+		$tank02
+		$tank_mask
+		$playertank_trigger
+		$playertank
+		$panzer_mask
+		$kingtigercollision
+	endArray
+	level.coop_levelObstacle["general"] = local.levelObstacle
+	
+//m5l2a specific
+	local.levelObstacleM5l2a = makeArray
+		$t214
+		$s5_tank
+		$s10_tank1
+		$s10_tank2
+		$s3_halftrak
+	endArray
+	level.coop_levelObstacle["m5l2a"] = local.levelObstacleM5l2a
+}end
+

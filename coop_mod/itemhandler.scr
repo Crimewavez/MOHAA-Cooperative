@@ -1,0 +1,2012 @@
+//[200] Smithy - this script is called every time an item enters the world by exec it on their tiki
+//Handles all pickups of weapons and items in the level
+//Manages player weapon loadouts for each mission
+//Implements item respawning
+//Enables multiple main weapons in MP gametypes
+//---------------------------------------------------
+//  level.coop_itemHandler					= 1		//use the coop item handler
+//  level.coop_healthDropFreq 				= 5 	//every num of axis deaths drop a health kit (5 is default engine behavior, 0 turns off health drops)
+//  level.coop_healthRespawnTime 			= 30 	//respawn time (seconds) for world (bsp or script) health items
+//	level.coop_ammoRespawnTime 				= 30 	//respawn time (seconds) for world (bsp or script) weapon and ammo items
+//	level.coop_retainInventory 				= 1 	//keep all weapons from previous life (0 to turn off)
+//	level.coop_disableHealthItems 			= 0		//disable all health items except for enemy drops and scripted items with targetnames
+//	level.coop_disableAmmoItems 			= 0 	//disable all ammo items except for scripted items with targetnames
+//---------------------------------------------------
+//Misc info:
+//---------------------------------------------------
+//	- items can be given their own respawn time with .flags["coop_itemRespawnTime"] (set to -1 to never respawn)
+//	- you can get a player's active weapon with .flags["coop_activeWeapon"]. if it returns null it means it is holstered (or they dont have one)
+//	- all inventory weapons for players are accessible via targetname array. convention is ("player" + player.entnum + "Inventory")
+//
+//---------------------------------------------------
+//new functions you can use:
+//---------------------------------------------------
+//dropItem
+// <entity>                             		<item to drop>      <do velocity>     <targetname>      <angles> <mass>
+//Example: local.entity thread dropItem "items/item_25_healthbox.tik"  game.true       "droppedHealth"   (0 90 0)  1200
+//---------------------------------------------------
+//dropItemOnDeath
+//local.actor thread dropItem <item model> <angles> <mass>
+//---------------------------------------------------
+//=========================================================================
+main local.thread local.arg1 local.arg2:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/main->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.threadName = "coop_mod/itemhandler.scr::main"
+
+	if !(waitthread coop_mod/main.scr::inCoopMode){ end } //dont load this if we aren't in coop mode
+	if (!self){ end }
+	
+	if (local.thread == NIL){ end } 
+	if (self.classname != "Health" && self.classname != "AmmoEntity" && self.classname != "Weapon"){ end }	
+
+	//make sure main.scr has loaded
+	waitthread coop_mod/main.scr::waitForMainScript
+	if (!self){ end }
+
+
+	//if we don't allow item handler end here
+	if (!level.coop_itemHandler){ end }
+
+	//these aren't used in coop
+	if (self.model){
+		if (self.model == "models/weapons/m18_smoke_grenade.tik" 	||
+			self.model == "models/weapons/rdg-1_smoke_grenade.tik" 	||
+			self.model == "models/weapons/nebelhandgranate.tik"){
+			self delete
+			end
+		}
+	}
+	
+	thread removeAdditionalStartAmmo
+	
+	//store parm.other that is updated on specific events, such as playerspawn:
+	//https://github.com/openmoh/openmohaa/blob/54355278307a64d2e62e68f8450aeb3cdf7651b3/code/game/player.cpp#L4252
+	//-----
+	//as parm.other is a global var for ALL threads and is never cleared (only reset on further events),
+	//and because items can spawn before/after a playerspawn event and NOT be attached to a player,
+	//that means this is a POTENTIAL owner. However, the only use we have for this (checking player weapons)
+	//means this will be right for the items we want to check.
+	group.itemOwner 	= parm.other
+	group.itemSpawnTime = level.time
+
+	wait game.ms 							//so entities have properly initialised
+	wait game.ms                            //two, so aihandler executes first if it is needed
+											//(otherwise, when actors spawn, the weapon is handled first)
+	if(!self){ end }
+
+	//only init this once
+	if(!level.coop_initItemHandler){
+		level.coop_initItemHandler = game.true
+		if (!level.coop_aaMap){
+			level.coop_noDropHealth = game.true //don't conflict with maps that actually don't want health drops
+		}else{
+			level.nodrophealth = game.true 		//otherwise, no engine health drops needed as we do this ourselves now
+		}
+		setcvar "g_healrate" "100000" 			//this didn't seem to work in config. adding it here does
+		setcvar "g_healthdrop" "0"				//we really don't need big health kits dropping in coop
+	}
+
+	//if we don't allow health items, delete them and end here
+	if (self.classname == "Health" && level.coop_disableHealthItems && (self.targetname == "health" || self.targetname == "")){
+		self remove
+		end
+	}
+	//if we don't allow ammo items, delete them and end here
+	if (self.classname == "AmmoEntity" && level.coop_disableAmmoItems && self.targetname == ""){
+		self remove
+		end
+	}
+
+	//store the weapon name on the weapon (passed in from tikis)
+	self.flags["coop_weaponName"] = local.arg2
+
+	//don't reinitialise respawned items
+	if (self.flags["coop_respawnedItem"]){ end }
+
+	thread local.thread local.arg1 
+}end
+
+//this will do the required checks and fire off the required handlers.
+//it allows us to discern world items, player items, and actor items.
+//if it's a player weapon, we we set basic properties and add it to their inventory array and end.
+//if it's an unused leftover player weapon we set basic properties and end.
+//if it's an active actor weapon (in use) we set basic properties and end.
+//if it's a deactive actor weapon (dropped) we properly initialise handlers for pickup.
+//if it's a world item we properly initialise handlers for pickup.
+//These are all so we only use handler threads when absolutely necessary,
+//to avoid memory leaks.
+//=========================================================================
+initialiseItem local.ammotype:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/initialiseItem->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.threadName = "coop_mod/itemhandler.scr::initialiseItem"
+	group.thread["initialiseItem"] = local
+
+	group.item 							= self
+	group.type 							= self.classname
+	group.isActorWeapon 				= self.flags["coop_isActorWeapon"]		//NOTE: this is set in storeActorWeapon called from global/weapon.scr
+	group.physObject 					= self.flags["coop_itemPhysicsObject"]  //NOTE: this is set in dropItem func
+	group.itemFlags 					= self.flags 							//NOTE: just grab all flags to make it future proof
+	group.item set_respawn 0 			//don't respawn automatically
+	group.item nottriggerable
+
+	if (group.type == "Weapon"){
+		group.item.flags["coop_AmmoType"] 	= local.ammotype
+		group.ammotype 						= local.ammotype
+	}
+
+	waitthread getItemWorldProperties
+
+	//player weapons we spawn in
+	if (group.item.flags["coop_playerNewWeapon"]){
+		local.player = group.item.flags["coop_itemOwner"]
+		if (isAlive local.player){
+			//local.player.flags["coop_inventoryAmmo"][group.ammotype] = game.true
+			thread addWeaponToInventory local.player group.item.model
+		}
+		end //we don't fully initialise player weapons as they cannot be dropped
+	}
+
+	if (!group.isActorWeapon && group.type == "Weapon"){
+		//OK, no actor carries it, so might as well make it notdroppable.
+		group.item notdroppable
+
+		//Now check if it is an unused player weapon
+		//this is needed because as soon as a player spawns, their default MP loadout will spawn
+		//and they seem to 'bind' with our custom weapon loadout, so you can't remove them!
+		//even though they are 'separate'.
+		//so no point processing these weapons!
+		//we need to make sure the item spawn time is the same as player spawn time
+		if (group.angles == (0 0 0) && group.item.origin == (0 0 0)){ 										//non-active player weapons retain 0 properties
+			if (group.itemOwner){
+				local.offset = 0.001																		//because we wait at least 1ms before giving new weapons
+				local.playerSpawnTime = group.itemOwner.flags["coop_spawnEventTime"]						//store the player's spawn time
+				local.playerNum = group.itemOwner.entnum
+				//as disguising can take time we add this time up
+				while (group.itemOwner && group.itemOwner.flags["coop_startingDisguise"]){
+					if (group.itemOwner.flags["coop_spawnTimeOffset"]){
+						local.offset += group.itemOwner.flags["coop_spawnTimeOffset"]
+						break
+					}
+					wait game.ms
+				}
+				if (group.itemSpawnTime - local.offset == local.playerSpawnTime){ 			//check if this item spawn time shares the parm.other spawn time
+					end
+				}
+			}
+			waitthread uninitialiseTimer //check to see if we should stop init of item
+		}
+		//any weapons that make it here will be those placed in the world via BSP or script
+
+		waitthread setupGrenades //fix any nades laying around the level
+	}else if (group.isActorWeapon && !group.item.flags["coop_initialiseMe"]){
+		//OK, to cut down on threads i'll only handle actor weapon pickups``
+		//when they are dropped from their owner's hands on death
+		end
+	}
+
+	if (!group.item){ end }
+	group.item triggerable
+
+	thread waitTillPickupEvent			//initialises the pickup event checker
+	thread itemDropCheck				//checks to see if this item was dropped
+	thread droppedItemLife 				//start the garbage collection timer if this is a dropped item
+	thread handleWeaponPickup           //if it's a weapon, do the pickup handler
+}end
+
+//this is the main weapon pickup handler. it waits for initial trigger events (use or touch)
+//and then checks to see if the pickup event has fired (waitTillPickupEvent).
+//if it hasn't, that means we weren't able to pick the weapon up.
+//next we can check if the player is already carrying the same ammotype.
+//if they are that means they have full ammo.
+//if not we can pick it up with gametype 0 hack.
+//=========================================================================
+handleWeaponPickup:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/handleWeaponPickup->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.threadName = "coop_mod/itemhandler.scr::handleWeaponPickup"
+
+	if (group.type != "Weapon"){ end }
+	group.pickupHandlerThread = local
+
+	if (!group.item || group.item.flags["coop_itemIsHandled"]){ end }
+	group.item.flags["coop_itemIsHandled"] = game.true
+
+	thread updateRespawnTime
+	while (1){
+		while (group.item){
+			group.item waittill trigger 								//wait here until the weapon has been triggered
+			local.player = parm.other
+			
+			waitthread getItemWorldProperties  							//grab latest properties
+			
+			local.isCarryingClass = waitthread isCarryingAmmoType local.player group.ammotype //[202][hotfix] Smithy - grab this for future use
+											
+			wait game.ms
+
+			if ((!local.player || local.player.classname != "Player") && group.item){ continue }		
+
+			if (!group.pickupEvent){ 										//a pickup event wasn't found. this means this weapon WAS NOT picked up
+				if (!group.item){
+					if (group.pickupEventThread){ group.pickupEventThread end }
+					if (group.droppedItemLifeThread){ group.droppedItemLifeThread end }
+					end
+				}
+				if (local.isCarryingClass){ //ok, no pickup found, check that he doesn't just have full ammo
+					continue
+				}
+
+				if (!waitthread isWeaponAllowed local.player group.item){ //ok, now check if we are allowed this weapon
+					continue
+				}
+
+				waitthread getItemWorldProperties 							//grab latest properties
+
+				//ok, it wasn't picked up and he doesn't have full ammo... must be a new weapon. lets hack it in.
+				waitthread coop_mod/main.scr::changeGameType 0 0
+				group.item triggereffect local.player
+				waitthread coop_mod/main.scr::changeGameType 2 0
+
+				if (group.pickupEvent){
+					group.pickupEvent = game.false
+					if (group.item && group.isActorWeapon){
+						group.item.flags["coop_weaponPickedUp"] = game.true
+						group.item.flags["coop_playerNewWeapon"] = game.true
+						group.item targetname ("player" + local.player.entnum + "Inventory")
+					}
+					break
+				}else{
+					println "(itemhandler.scr::handleWeaponPickup) *ERROR*: Weapon " group.item " with model " group.model " cannot be picked up by " local.player.netname
+				}
+			}else{
+				//pickup event found straight away. hallelujah.
+				group.pickupEvent = game.false
+				if (group.item && group.isActorWeapon){
+					group.item.flags["coop_weaponPickedUp"] = game.true
+				}
+				break
+			}
+		}
+		
+		thread addWeaponToInventory local.player group.model "pickup" group.ammotype //it's a pickup so check for ammo types
+
+		if (group.pickupEventThread){ group.pickupEventThread end }
+
+		//world weapons can be respawned
+		if (!group.isActorWeapon){
+			thread updateRespawnTime
+			waitthread waitTillValidTime 				//waits here if respawn time is 0
+			if (group.respawnTime < 0){ end }
+			wait group.respawnTime
+			thread respawnItem
+			thread waitTillPickupEvent
+		}else{
+			//do some housekeeping - we don't want memory leaks!
+			if (group.droppedItemLifeThread){ group.droppedItemLifeThread end }
+			end
+		}
+	}
+}end
+
+//waits for a pickup event and then flags the player doing the picking up
+//so that we can use this for any handleWeaponPickup events
+//if it is a health or ammo item then handle the respawn here.
+//=========================================================================
+waitTillPickupEvent:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/waitTillPickupEvent->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.threadName = "coop_mod/itemhandler.scr::waitTillPickupEvent"
+
+	group.pickupEventThread = local
+	while (group.item && !group.item.flags["coop_weaponPickedUp"])
+	{
+		group.item waittill pickup
+		local.player = parm.other
+
+		if (group.type == "Weapon"){
+			group.pickupEvent = game.true 											//flag pickup event to check in handleWeaponPickup
+			if (group.item){
+				group.item notdroppable
+			}
+		}
+		if (group.physObject){
+			group.physObject remove
+		}
+		if(!group.droppedByEntity && group.type != "Weapon"){ 				//world weapon respawns are handled in handleWeaponPickup
+			thread updateRespawnTime
+			waitthread waitTillValidTime 									//waits here if respawn time is 0
+			if (group.respawnTime < 0){ end }
+			wait group.respawnTime
+			thread respawnItem
+			continue
+		}else if(group.droppedByEntity){ 									//dropped items never respawn
+			if (group.droppedItemLifeThread){ group.droppedItemLifeThread end }
+			end
+		}
+	}
+}end
+
+//if the item is still at default (0 0 0) origin it means it's probably not used
+//=========================================================================
+uninitialiseTimer:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/uninitialiseTimer->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	wait 3
+	if ((group.item && group.item.angles == (0 0 0) && group.item.origin == (0 0 0)) || !group.item){
+		group.thread["initialiseItem"] end //we now kill thread via group as parm.previousthread, like parm.other, is a global var that can change due to external thread calls
+	}
+}end
+
+//this will remove any threads to do with pickup handling after an item's life has ended.
+//just in case a weapon is never picked up and gets despawned by the engine.
+//such as enemy weapon or health kit drops.
+//it also removes our custom items so it behaves like the engine
+//=========================================================================
+droppedItemLife:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/droppedItemLife->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.threadName = "coop_mod/itemhandler.scr::droppedItemLife"
+
+	if (!group.droppedByEntity){ end }
+
+	group.droppedItemLifeThread = local
+
+	wait (int(getcvar "g_droppeditemlife")) 				//this cvar is set to 30 seconds by default.
+
+	if(group.item && group.item.flags["coop_droppedItem"]){	//these are our script items that drop
+		group.item remove
+	}
+	if (group.physObject){
+		group.physObject remove
+	}
+	if (group.pickupEventThread) 	{ group.pickupEventThread end }
+	if (group.pickupHandlerThread) 	{ group.pickupHandlerThread end }
+}end
+
+//looks for item velocity or if it has an explicit flag, to determine
+//if it was dropped from an entity.
+//=========================================================================
+itemDropCheck:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/itemDropCheck->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (group.item && ((group.item.flags["coop_droppedItem"]) || (group.item.velocity != (0 0 0) && group.item.angles != (0 0 0)))){
+		group.droppedByEntity = game.true
+	}else{
+		group.droppedByEntity = game.false
+	}
+}end
+
+//updates the respawn time if it has changed in the interim
+//=========================================================================
+updateRespawnTime:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/updateRespawnTime->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (group.itemFlags["coop_itemRespawnTime"] != NIL){
+		group.respawnTime = group.itemFlags["coop_itemRespawnTime"]
+		end
+	}
+	if (group.type == "Health"){
+		group.respawnTime = level.coop_healthRespawnTime
+	}else{
+		group.respawnTime = level.coop_ammoRespawnTime
+	}
+}end
+
+//updates the respawn time if it has changed in the interim
+//=========================================================================
+waitTillValidTime:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/waitTillValidTime->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	while (group.respawnTime == 0){
+		wait 5
+		thread updateRespawnTime
+	}
+}end
+
+//gets a snapshot of item location and properties
+//=========================================================================
+getItemWorldProperties:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/getItemWorldProperties->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (!group.item){ end }
+	group.model 		= group.item.model
+	group.angles 		= group.item.angles
+	group.scale 		= group.item.scale
+	group.angle 		= group.item.angle
+	group.origin 		= group.item.origin
+}end
+
+//duh
+//=========================================================================
+respawnItem:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/respawnItem->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	group.item 								= spawn group.model
+	group.item.flags["coop_respawnedItem"] 	= game.true 			//dont reprocess this item
+	group.item angles 						group.angles
+	group.item scale 						group.scale
+	group.item origin 						group.origin
+	group.item set_respawn 0
+}end
+
+//this is called from the global/weapon.scr when an actor gets a weapon.
+//this includes those they spawn with and any that are given via script post-spawn.
+//it allows us to know which weapons are carried by actors,
+//so that they can be droppable and processed by player pickup events.
+//an example of this being called post-spawn is if a weapon is given to an actor via script
+//(e.g. Grillo picking up an MP40).
+//NOTE: the engine calls global/weapon.scr automatically.
+//=========================================================================
+storeActorWeapon:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/storeActorWeapon->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	self weaponcommand "dual" targetname ("actorGun" + self.entnum) //grab any gun in either hand (dual) and then give it a unique targetname
+	local.weap = $("actorGun" + self.entnum) 						//with this new targetname we can now store it in a var
+	if (local.weap){                                                //you never know, the AI could be unarmed!
+		local.weap.flags["coop_isActorWeapon"] 	= game.true 		//flag it as an actor's weapon
+		self.flags["coop_mainActorWeapon"] 		= local.weap 		//store it on the actor so we can enable it later
+		local.weap.targetname 					= ""                //undefine the targetname (DONT SET TO NIL, EMPTY STRING INSTEAD!)
+	}else{
+		self.flags["coop_mainActorWeapon"] = NULL
+	}
+}end
+
+//this is called from the aihandler when an actor dies
+//it makes the weapon that is dropped from a dead guy triggerable (thus usable).
+//it also fully initialises the weapon for pickup handling
+//=========================================================================
+enableWeapon:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/enableWeapon->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (!self){ end }
+	local.weapon = self.flags["coop_mainActorWeapon"]
+	self.flags["coop_mainActorWeapon"] = NULL
+	if (local.weapon){
+		local.weapon.flags["coop_initialiseMe"] 	= game.true 		//it is an actor's weapon but it can now be initialised
+		local.weapon.flags["coop_droppedItem"] 		= game.true         //don't do drop checks as we know that it will fall from their hands
+		local.weapon triggerable
+		local.weapon thread initialiseItem local.weapon.flags["coop_AmmoType"]
+	}
+}end
+
+//restores grenade counts for all AI to match default SP behavior
+//this is called every time AI get a new weapon (global/weapon.scr)
+//=========================================================================
+restoreNadeCount:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/restoreNadeCount->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	waitframe
+	if (!isAlive self || self.classname != "Actor" || !self.gun){ end }
+	//iprintlnbold_noloc("weapontype is " + self.weapontype)
+
+	//check weapons
+	switch (self.weapontype){
+		case "rifle":
+			switch (self.gun){
+				case "mauser kar 98k":
+				case "m1 garand":
+				case "enfield":
+				case "carcano":
+				case "mosin nagant rifle":
+					local.grencount = -4; break
+				case "g 43":
+				case "mauser kar 98d sniper":
+				case "springfield '03 sniper":
+				case "svt 40":
+				case "enfield l42a1":
+					local.grencount = -1; break
+			}
+			break
+		case "smg":
+		case "mg":
+			local.grencount = -2; break
+		case "heavy":
+			switch (self.gun){
+				case "shotgun":
+					local.grencount = -2; break
+				default:
+					local.grencount = -1; break
+			}
+			break
+		default:
+			local.grencount = self.ammo_grenade; break
+	}
+
+	//iprintlnbold_noloc("gren count is " + local.grencount)
+
+	if (local.grencount != NIL && self.ammo_grenade > 0){
+		self ammo_grenade local.grencount
+	}
+
+	//iprintlnbold_noloc("ACTOR HAS " + self.ammo_grenade + " GRENADES")
+
+}end
+
+//do our own enemy health drops so we know it is a dropped item
+//(internal use only)
+//=========================================================================
+handleHealthDrop:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/handleHealthDrop->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (level.coop_healthDropFreq <= 0){ end }
+	wait 0.001
+	if (!self){ 																		//deleted guys don't drop health...
+		end
+	}else{
+		if (!self.fact || self.fact.attacker == $world || self.team == "american"){ 	//don't drop health if they die from world or if they are allies
+			end
+		}
+		//reset death count if we reached limit
+		if (!level.coop_actorDeathCount || level.coop_actorDeathCount == level.coop_healthDropFreq){
+			level.coop_actorDeathCount = 0
+		}
+		level.coop_actorDeathCount++
+		if (level.coop_actorDeathCount == level.coop_healthDropFreq){
+			thread dropItem "items/item_25_healthbox.tik" 1 "droppedHealth" NIL 1200
+		}
+	}
+}end
+
+//drops an item of specified model from an entity
+//(can be used externally)
+//=====================================================================
+dropItem local.model local.doVelocity local.targetname local.angles local.mass:{
+//=====================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/dropItem->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (!local.model){ end }
+
+	if (local.angles){
+		local.dropAngles = local.angles
+	}else{
+		local.dropAngles = self.angles
+	}
+
+	if(!local.mass){
+		local.mass = 900
+	}
+
+	//[200] Smithy - check if this is a custom item (has a prefix of 'spawn')
+	local.customPrefix = "spawn"
+	local.isCustomItem = game.true
+	for (local.i = 0; local.i <= (local.customPrefix.size - 1); local.i++){
+		local.isCustomItem = local.isCustomItem && local.model[local.i] == local.customPrefix[local.i]
+	}
+
+	if (local.isCustomItem){
+		local.item = thread coop_mod/custom_items.scr::local.model  //[200] Smithy - spawn our custom item	
+	}else{
+		local.item = spawn local.model targetname local.targetname  //this is the actual item
+	}
+
+	local.item.flags["coop_droppedItem"] = game.true
+	local.item angles local.dropAngles
+	local.item origin (self.origin + (0 0 40))
+	local.item show
+	local.item triggerable
+
+	local.physObject = spawn ScriptSlave 				//this is so our new item can be physically simulated by gluing the item to it
+	local.physObject origin local.item.origin
+	local.physObject notsolid
+	local.item.flags["coop_itemPhysicsObject"] = local.physObject
+	local.item glue local.physObject
+
+	local.physObject mass local.mass
+	local.physObject physics_on 1 						//turn the physics on but don't collide with the corpse
+
+	if (local.doVelocity){
+		thread calculateDropVelocity 					//calculate velocity - this replicates the engine
+		local.physObject.velocity = group.velocity 		//give it an impulse
+	}
+}end
+
+//replicates engine calculcation for drop velocity:
+//velocity = owner->velocity * 0.5 + Vector( G_CRandom( 50 ), G_CRandom( 50 ), 100 );
+//(internal use only)
+//=====================================================================
+calculateDropVelocity:{
+//=====================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/calculateDropVelocity->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	group.velocity 		= self.velocity
+	group.velocity[0] 	= (group.velocity[0] * 0.5) + randomint(50)
+	group.velocity[1] 	= (group.velocity[1] * 0.5) + randomint(50)
+	group.velocity[2] 	= (group.velocity[2] * 0.5) + 100
+}end
+
+//check if this weapon is forced on player
+//=====================================================================
+isWeaponAllowed local.player local.item:{
+//=====================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/isWeaponAllowed->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (local.player.flags["coop_PrimaryWeapon"] || local.player.flags["coop_SecondaryWeapon"]){
+		if (local.player.flags["coop_PrimaryWeapon"] == local.item.model){
+			end(game.true)
+		}
+		if (local.player.flags["coop_SecondaryWeapon"] == local.item.model){
+			end(game.true)
+		}
+	}else{
+		end(game.true)
+	}
+}end(game.false)
+
+//force a weapon on all players
+//=====================================================================
+forceWeaponOnAll local.model:{
+//=====================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/forceWeaponOnAll->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if ($player){
+		for (local.i = 1; local.i <= $player.size; local.i++){
+			thread forceWeaponOnPlayer $player[local.i] local.model
+		}
+	}
+	if (waitthread isPrimaryWeapon local.model){
+		level.coop_playerPrimaryWeapon = local.model
+	}else{
+		level.coop_playerSecondaryWeapon = local.model
+	}
+}end
+
+//force a weapon on player
+//=====================================================================
+forceWeaponOnPlayer local.player local.model:{
+//=====================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/forceWeaponOnPlayer->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (waitthread isPrimaryWeapon local.model){
+		local.player.flags["coop_PrimaryWeapon"] = local.model
+	}else{
+		local.player.flags["coop_SecondaryWeapon"] = local.model
+	}
+}end
+
+//stop forcing weapon of type ('primary' or 'secondary') on all
+//=====================================================================
+stopForceWeaponOnAll local.type:{
+//=====================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/stopForceWeaponOnAll->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if ($player){
+		for (local.i = 1; local.i <= $player.size; local.i++){
+			thread stopForceWeaponOnPlayer $player[local.i] local.type
+		}
+	}
+	if (local.type == "primary"){
+		level.coop_playerPrimaryWeapon = NIL
+	}else{
+		level.coop_playerSecondaryWeapon = NIL
+	}
+}end
+
+//stop forcing weapon of type ('primary' or 'secondary') on player
+//=====================================================================
+stopForceWeaponOnPlayer local.player local.type:{
+//=====================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/stopForceWeaponOnPlayer->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (local.type == "primary"){
+		local.player.flags["coop_PrimaryWeapon"] = NIL
+	}else{
+		local.player.flags["coop_SecondaryWeapon"] = NIL
+	}
+}end
+
+//handles the player spawn and weapon loadout logic
+//also handles player diguises on spawn
+//(internal use only)
+//=========================================================================
+managePlayerInventory:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/managePlayerInventory->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	group.player = self
+	group.thread["managePlayerInventory"] = local
+
+	//set some default flags for unused weapon offset calcs
+	group.player.flags["coop_spawnEventTime"] 	= level.time
+	group.player.flags["coop_spawnTimeOffset"] 	= 0
+	group.player.flags["coop_startingDisguise"] = game.false
+
+	//remove any previous inventory weapons from the game for this player if any exist
+	thread deletePreviousInvWeapons
+	group.player takeall
+
+	//if no weapons are allowed
+	if (level.coop_noWeapon){ end }	
+	
+	//[200] Smithy - check if this is a briefing mission. if so, don't allow weapons
+	if (level.coop_mapname[0] == "b"){
+		local.mapPrefix 	= "briefing"
+		local.isBriefing 	= game.true
+		for (local.i = 0; local.i <= (local.mapPrefix.size - 1); local.i++){
+			local.isBriefing = local.isBriefing && level.coop_mapname[local.i] == local.mapPrefix[local.i]
+		}
+		if (local.isBriefing){ end }
+	}
+
+	//lets take advantage of having no weapons to give player a disguise if they need one
+	if (level.coop_enableDisguises && !group.player.is_disguised){
+		waitthread giveDisguiseOnSpawn group.player
+	}
+	//as player models reset on spawn re-give them the uniform if they need one
+	if (level.coop_enableDisguises && level.coop_uniformOnSpawn && group.player.flags["coop_hasDisguise"] && group.player.has_disguise){
+		thread giveUniformToPlayer group.player
+	}else{
+		thread takeUniformFromPlayer group.player
+	}
+	//if it's a new player and they do not have the papers flag
+	if (level.coop_itemPapers && !group.player.flags["coop_hasPapers"]){
+		thread givePapersFlag group.player
+	}
+
+	//either give them a default loadout or give them their old one
+	thread giveWeaponLoadout !(level.coop_retainInventory && waitthread playerHasInventory group.player)
+}end
+
+//[202] Smithy - improved to swap to previous uniform
+//=========================================================================
+takeUniformFromPlayer local.player:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/takeUniformFromPlayer->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+/*
+	if (local.player.flags["coop_hasEnemyUniform"]){
+		if (local.player.flags["coop_alliedUniform"]){
+			local.uniform = local.player.flags["coop_alliedUniform"]
+			local.model = local.player.flags["coop_alliedModel"]
+		}else{
+			local.uniform = "american_army"
+			local.model = "models/player/american_army.tik"
+		}
+		local.player.flags["coop_hasEnemyUniform"] = game.false
+		local.player stufftext ("dm_playermodel " + local.uniform)
+		local.player.model = local.model
+		end
+	}else{
+		local.uniform = waitthread getPlayerUniform local.player
+		local.player stufftext ("dm_playermodel " + local.uniform)
+	}
+*/
+//[203] chrissstrahl - reactivating Smithy code to allow other allied models
+	if (waitthread playerHasEnemyUniform local.player local.uniform){ //set a default uniform if they somehow manage to have an exis one.
+		println "PLAYER HAS ENEMY UNIFORM - NOT ALLOWED!"
+		local.uniform = "american_army"
+		local.model = "models/player/"+local.uniform+".tik"
+		//[203] chrissstrahl - make sure the command is not send if already in progress
+		local.commandResetFov = ";vstr g_m2l1"
+		if(local.player.flags["coopFovIsResetting"]){
+			local.commandResetFov = ""
+		}else{
+			local.player.flags["coopFovIsResetting"] = 1			
+		}
+		
+		local.player stufftext ("dm_playermodel "+local.uniform+""+local.commandResetFov) //[203] chrissstrahl - fix fov being reset on uinform change
+		local.player.model = local.model
+	}else{		
+		local.model = local.player.model
+		
+		//[203] chrissstrahl - make sure the command is not send if already in progress
+		if(!(local.player.flags["coopFovIsResetting"])){
+			local.player.flags["coopFovIsResetting"] = 1
+			local.player stufftext ("vstr g_m2l1") //[203] chrissstrahl - fix fov being reset on uinform change
+		}
+	}
+}end
+
+//[202] Smithy
+//=========================================================================
+playerHasEnemyUniform local.player local.uniform:{
+//=========================================================================
+	local.isGerman = waitthread game.main::containsText local.uniform "german"
+	local.isItalian = waitthread game.main::containsText local.uniform "_AX_"
+}end(local.isGerman || local.isItalian)
+
+//=========================================================================
+giveUniformToPlayer local.player:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/giveUniformToPlayer->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (!level.coop_disguiseUniform){
+		local.uniform = "german_waffenss_officer"
+	}else{
+		local.uniform = level.coop_disguiseUniform
+	}
+	
+	//[202] Smithy [203] chrissstrahl - reactivated to allow player selecting any allied model
+	local.player.flags["coop_hasEnemyUniform"] = game.true
+	if (!local.player.flags["coop_alliedUniform"]){
+		local.player.flags["coop_alliedModel"] = local.player.model
+		local.player.flags["coop_alliedUniform"] = waitthread getPlayerUniform local.player
+	}
+
+	local.model = "models/player/" + local.uniform + ".tik"
+	local.player.model = (local.model)
+	local.player stufftext ("dm_playermodel " + local.uniform+";vstr g_m2l1") //[203] chrissstrahl - fix fov being reset on uinform change
+}end
+
+//=========================================================================
+getPlayerUniform local.player:{
+//=========================================================================
+	local.uniform = ""
+	local.model = local.player.model
+	local.s = 0
+	for (local.i = 0; local.i <= local.model.size; local.i++){
+		if (local.model[local.i] == "/") local.s++
+		if (local.s == 2){	
+			for (local.j = local.i + 1; local.j <= local.model.size; local.j++){							
+				if (local.model[local.j] == ".") end(local.uniform)
+				local.uniform += local.model[local.j]
+			}	
+		}	
+	}
+}end(local.uniform)
+
+//gives all players the german officer's uniform as their player model
+//also turns on uniforms on spawn
+//=========================================================================
+giveUniformToAll:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/giveUniformToAll->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	level.coop_uniformOnSpawn = game.true
+	for (local.i = 1; local.i <= $player.size; local.i++){
+		thread giveUniformToPlayer $player[local.i]
+	}
+}end
+
+//gives a player the diguise on first spawn (connection),
+//so no tallies are needed.
+//(internal)
+//=========================================================================
+giveDisguiseOnConnect:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/giveDisguiseOnConnect->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	thread giveDisguise group.player
+}end
+
+//gives a player the diguise and tallies up time spent
+//in alternate gametype. this is so unused weapon loadouts can be
+//processed.
+//(internal)
+//=========================================================================
+giveDisguiseOnSpawn local.player:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/giveDisguiseOnSpawn->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.start = level.time
+	local.player.flags["coop_startingDisguise"] = game.true
+
+	waitthread giveDisguise local.player
+
+	local.end = level.time
+	local.player.flags["coop_spawnTimeOffset"] += (local.end - local.start)
+}end
+
+//gives a player the diguise
+//see _disguisenotes.txt for more info on what im bypassing in engine
+//see giveDisguiseToAll below for more info
+//=========================================================================
+giveDisguise local.player:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/giveDisguise->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.threadName = "coop_mod/itemhandler.scr::giveDisguise"
+
+	//make sure this isn't a concurrent func
+	//may help stop any issues with gametype swap
+	if (level.coop_disguisingInProgress){
+		while (level.coop_disguisingInProgress){
+			wait game.ms
+		}
+		if (!isAlive local.player || local.player.dmteam == "spectator"){
+			group.thread["managePlayerInventory"] end //stop any outstanding external threads (managePlayerInventory)
+			local end //stop this thread
+		}
+	}
+
+	level.coop_disguisingInProgress = game.true
+
+	//temporarily force enemies into idle thinkstate so engine allows us to disguise properly (criterion 1)
+	if (thread coop_mod/aihandler.scr::anyEnemiesInAttackState){
+		local.resetAttackStates = game.true
+		waitthread coop_mod/aihandler.scr::resetEnemyThinkstates
+	}
+
+	//temporarily deactivate player weapon so engine allows us to disguise properly (criterion 2)
+	local.player thread deactivatePlayerWeapon
+
+	waitthread coop_mod/main.scr::changeGameType 0 0
+	local.player.has_disguise 				= game.true
+	local.player.flags["coop_hasDisguise"] 	= game.true
+	waitthread coop_mod/main.scr::changeGameType 2 game.ms
+
+	local.player thread activatePlayerWeapon
+
+	//make previously attacking enemies aggressive again
+	if (local.resetAttackStates){
+		thread coop_mod/aihandler.scr::setEnemyAttackStates
+	}
+
+	level.coop_disguisingInProgress = game.false
+}end
+
+//gives all players the diguise
+//we have to do some hackery to get this working but it works nonetheless
+//firstly we force all enemies into idle state (if they aren't already)
+//second we deactivate all unholstered player weapons
+//then we give them disguise
+//then we reactivate weapons and make previously attacking enemies attack you again
+//you will see your weapon unholster and holster quickly, but this is the nicest
+//it's gonna get. just pretend it's the guy quickly putting their disguise on :P
+//you won't notice enemies going into idle as it happens very quickly
+//see _disguise.txt in /notes for more info on what im bypassing in engine
+//=========================================================================
+giveDisguiseToAll:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/giveDisguiseToAll->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.threadName = "coop_mod/itemhandler.scr::giveDisguiseToAll"
+
+	if (level.coop_enableDisguises || level.alarm){ end }
+	level.coop_enableDisguises = game.true
+
+	if (!$player){ end }
+
+	//temporarily force enemies into idle thinkstate so engine allows us to disguise properly (criterion 1)
+	if (thread coop_mod/aihandler.scr::anyEnemiesInAttackState){
+		local.resetAttackStates = game.true
+		waitthread coop_mod/aihandler.scr::resetEnemyThinkstates
+	}
+
+	//temporarily deactivate player weapons so engine allows us to disguise properly (criterion 2)
+	thread deactivateAllPlayerWeapons
+
+	waitthread coop_mod/main.scr::changeGameType 0 0
+	for (local.i = 1; local.i <= $player.size; local.i++){
+		local.player = $player[local.i]
+		local.player.flags["coop_hasDisguise"] 	= game.true
+		local.player.has_disguise 				= game.true
+	}
+	waitthread coop_mod/main.scr::changeGameType 2 game.ms
+
+	//give players their previously active weapon (if they had one)
+	thread activateAllPlayerWeapons
+
+	//make previously attacking enemies aggressive again
+	if (local.resetAttackStates){
+		thread coop_mod/aihandler.scr::setEnemyAttackStates
+	}
+
+	level.coop_enableDisguises = game.true
+
+	local.anyPlayerNotDisguised = thread anyPlayerNotDisguised
+	if (local.anyPlayerNotDisguised && level.coop_enableDisguises && !level.alarm){
+
+		//disguising failed... try again
+		level.coop_enableDisguises = game.false
+		for (local.i = 1; local.i <= $player.size; local.i++){
+			$player[local.i].flags["coop_hasDisguise"] = game.false
+		}
+		thread giveDisguiseToAll
+	}else if (!local.anyPlayerNotDisguised && level.coop_enableDisguises && !level.alarm){
+
+		iprintlnbold_noloc("You are now disguised!")
+		wait game.ms
+
+		//now set their initial isDisguised flag
+		for (local.i = 1; local.i <= $player.size; local.i++){
+			local.player = $player[local.i]
+			local.item = thread returnActiveWeapon local.player
+			thread setIsDisguised local.player (local.item == NULL || local.item.classname != "Weapon")
+		}
+
+		//we can now enable the handler for AI behavior
+		thread coop_mod/aihandler.scr::disguiseHandler
+
+	}else if (level.alarm){
+		iprintlnbold_noloc("The alarm was raised. You can no longer disguise!")
+		level.coop_enableDisguises = game.false
+	}
+}end
+
+//=========================================================================
+anyPlayerNotDisguised:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/anyPlayerNotDisguised->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	for (local.i = 1; local.i <= $player.size; local.i++){
+		if (!$player[local.i].is_disguised){
+			end (game.true)
+		}
+	}
+}end (game.false)
+
+//=========================================================================
+deactivateAllPlayerWeapons:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/deactivateAllPlayerWeapons->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	for (local.i = 1; local.i <= $player.size; local.i++){
+		local.player = $player[local.i]
+		local.player thread deactivatePlayerWeapon
+	}
+}end
+
+//=========================================================================
+activateAllPlayerWeapons:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/activateAllPlayerWeapons->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	for (local.i = 1; local.i <= $player.size; local.i++){
+		local.player = $player[local.i]
+		local.player thread activatePlayerWeapon
+	}
+}end
+
+//deactivates any weapons in the player's hand.
+//this is needed if we want to disguise the player post spawn,
+//as we only enable SP engine disguise checks for 1 ms (gametype hack).
+//and the engine checks to see if an active weapon is in a player's hand
+//before setting is_disguised to true. we want it to be true!
+//=========================================================================
+deactivatePlayerWeapon:
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/deactivatePlayerWeapon->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.player = self
+	if (!isAlive local.player || local.player.dmteam == "spectator"){
+		end
+	}
+
+	local.item = waitthread returnActiveWeapon local.player
+	if (local.item == NULL || local.item.classname != "Weapon"){
+		local.player.flags["coop_lastActiveWeapon"] = NULL
+		end
+	}
+
+	local.player.flags["coop_lastActiveWeapon"] = local.item
+	local.player.flags["coop_activeWeapon"] 	= NULL
+	local.player deactivateweapon "dual"
+	local.player correctweaponattachments
+end
+
+//reactivates the previously deactivated weapon
+//=========================================================================
+activatePlayerWeapon:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/activatePlayerWeapon->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.player = self
+	if (!isAlive local.player || local.player.dmteam == "spectator" || local.player.flags["coop_lastActiveWeapon"] == NULL){
+		end
+	}
+
+	local.weapon 		= local.player.flags["coop_lastActiveWeapon"]
+	local.weaponName 	= local.weapon.flags["coop_weaponName"]
+
+	local.player use local.weaponName
+	wait game.ms
+	local.player activatenewweapon "dual"
+	local.player.flags["coop_activeWeapon"] 	= local.player.flags["coop_lastActiveWeapon"]
+	local.player.flags["coop_lastActiveWeapon"] = NULL
+}end
+
+//takes diguises from all players permanently
+//(external)
+//=========================================================================
+takeAllDisguises:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/takeAllDisguises->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (!level.coop_enableDisguises){ end } //[202] Smithy - don't bother doing this if all disguises are already taken
+
+	local.threadName = "coop_mod/itemhandler.scr::takeAllDisguises"
+	level.coop_enableDisguises 	= game.false
+	level.coop_uniformOnSpawn 	= game.false
+
+	if (!$player){ end }
+	waitthread coop_mod/main.scr::changeGameType 0 0
+	for (local.i = 1; local.i <= $player.size; local.i++){
+		$player[local.i].has_disguise 				= game.false
+		$player[local.i].flags["coop_hasDisguise"] 	= game.false
+		$player[local.i].flags["coop_isDisguised"] 	= game.false //remove isDisguised too...
+	}
+	waitthread coop_mod/main.scr::changeGameType 2 game.ms
+}end
+
+
+//gives the player the default level loadout
+//=========================================================================
+giveWeaponLoadout local.default:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/giveWeaponLoadout->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	group.invTargetname = ("player" + group.player.entnum + "Inventory") 	//e.g. player0Inventory
+
+	if (local.default){
+		thread resetPlayerWeapons group.player
+	}
+	//spawn them in first and flag them as playerWeapon
+	thread spawnInventory local.default
+
+	//store the targetname array into weapons var
+	group.weapons = $(group.invTargetname)
+	group.weapons notdroppable 				//don't allow players to drop weapons
+	group.weapons set_respawn 0
+
+	wait game.ms 							//makes sure the default weapons spawned by engine are processed separately to our new ones
+											//0.0005 translates to 1ms in the engine: 0.0005 -> (int)( time * 1000.0f + 0.5f ) -> 1
+											//this is why we take AT LEAST 1ms from group.itemSpawnTime (local.offset)
+
+	thread giveInventory 					//actually give them the weapons and default ammo
+
+	group.weapons origin group.player.origin
+	group.weapons hide
+	group.weapons notsolid
+	group.weapons nottriggerable
+	
+	//improve spawning when in disguise mission! 
+	if (group.player.has_disguise){ 
+		thread setIsDisguised group.player game.true //set initial disguise to true	
+		wait 0.25
+		if (isAlive group.player){
+			group.player thread deactivatePlayerWeapon
+		}
+		thread setIsDisguised group.player game.true //again, just to be sure after wait
+		if (!group.player.flags["coop_holsterHint"]){
+			group.player iprint "Keep your weapon holstered when in disguise." game.true
+			group.player.flags["coop_holsterHint"] = game.true //duh, set it as hinted
+		}
+	}else{	
+		wait 0.25
+		if (isAlive group.player){
+			group.player thread deactivatePlayerWeapon 			//this is so we stop the engine doing the weapon use for us when picking primary mp weapon
+		}
+		wait game.ms
+		if (isAlive group.player){ //[200] Smithy - allow the game to know their last active weapon on respawn (suggested by Chris)  
+			if (group.player.flags["coop_lastWeapon"] && waitthread playerHasWeapon group.player group.player.flags["coop_lastWeapon"]){ 
+				group.player use group.player.flags["coop_lastWeapon"]
+			}else{
+				if (level.coop_weaponUse){ //[201] Smithy
+					group.player useweaponclass level.coop_weaponUse
+				}				
+			}		
+			group.player activatenewweapon "dual" 				//unholster the right weapon as quickly as possible			
+		}
+	}
+	//reset disguise offset stuff
+	if (group.player){
+		group.player.flags["coop_startingDisguise"] = game.false
+		group.player.flags["coop_activeWeapon"] = waitthread returnActiveWeapon group.player //duh, initialise activeWeapon flag (will return weapon or NULL)
+		if (group.player.flags["coop_activeWeapon"]){
+			group.player.flags["coop_lastWeapon"] = group.player.flags["coop_activeWeapon"].model
+		}	 
+	}
+}end
+
+//spawns the inventory in
+//=========================================================================
+spawnInventory local.default:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/spawnInventory->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if ((!level.coop_weaponLoadout || level.coop_weaponLoadout.size == 0) && !level.coop_playerPrimaryWeapon && !level.coop_playerSecondaryWeapon){
+		//println "(coop_mod/itemhandler.scr::spawnInventory): *ERROR* - no weapon loadout found!"
+		end
+	}
+
+	local.weaponArray[1] = NIL
+
+	if (level.coop_playerPrimaryWeapon || level.coop_playerSecondaryWeapon){
+		if (level.coop_playerPrimaryWeapon){
+			local.weaponArray[local.weaponArray.size + 1] = level.coop_playerPrimaryWeapon
+			group.player.flags["coop_PrimaryWeapon"] = level.coop_playerPrimaryWeapon
+		}
+		if (level.coop_playerSecondaryWeapon){
+			local.weaponArray[local.weaponArray.size + 1] = level.coop_playerSecondaryWeapon
+			group.player.flags["coop_SecondaryWeapon"] = level.coop_playerSecondaryWeapon
+		}
+	}else{
+		if (local.default){
+			local.weaponArray = level.coop_weaponLoadout 					//the default level loadout
+		}else{
+			local.weaponArray = group.player.flags["coop_inventoryWeapons"]	//all the weapons the player has ever picked up
+		}	
+	}
+	
+	//[202] Smithy - spawn them backwards so the grenade start tiks are done first
+	//so additionalStartAmmo is removed from weaps, otherwise we can end up with 0 nades that are still usable
+	for (local.i = local.weaponArray.size; local.i > 0; local.i--){ 	//do the spawning
+		local.weapon = spawn local.weaponArray[local.i] targetname group.invTargetname tracerfrequency 0
+		local.weapon.flags["coop_playerNewWeapon"] 	= game.true
+		local.weapon.flags["coop_itemOwner"] 		= group.player
+		local.weapon thread removeAdditionalStartAmmo
+	}
+}end
+
+//this is what actually gives the players their weapons
+//uses our gametype hack
+//=========================================================================
+giveInventory:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/giveInventory->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.threadName = "coop_mod/itemhandler.scr::giveInventory"
+	
+	waitthread coop_mod/main.scr::changeGameType 0 0
+	group.weapons triggereffect group.player
+	for (local.i = 1; local.i <= level.coop_ammoLoadout.size; local.i++){
+		group.player ammo level.coop_ammoType[local.i] level.coop_ammoLoadout[level.coop_ammoType[local.i]]
+	}
+	waitthread coop_mod/main.scr::changeGameType 2 0	
+
+	//ok, stop the text showing on the screen by pushing it up...
+	for (local.i = 1; local.i <= 5; local.i++){ group.player iprint "" }
+}end
+
+//checks if a player holds a coop inventory
+//=========================================================================
+playerHasInventory local.player:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/playerHasInventory->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+}end (local.player.flags["coop_inventoryWeapons"].size > 0)
+
+//add weapon to everyone's inventory, whether current or future
+//use this if you want the whole server to spawn with this weap
+//=========================================================================
+addWeaponToEveryone local.model:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/addWeaponToEveryone->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (level.gametype == 0){ end }
+	thread addWeaponToAllInventories local.model
+	thread addWeaponToLoadout local.model
+}end
+
+//remove weapon from everyone's inventory, whether current or future
+//use this if you want to remove this weapon from all spawns
+//=========================================================================
+removeWeaponFromEveryone local.model:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/removeWeaponFromEveryone->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (level.gametype == 0){ end }
+	thread removeWeaponFromAllInventories local.model
+	thread removeWeaponFromLoadout local.model
+}end
+
+//add weapon to the inventories of all active players
+//=========================================================================
+addWeaponToAllInventories local.model:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/addWeaponToAllInventories->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (level.gametype == 0){ end }
+
+	if ($player){
+		for (local.i = 1; local.i <= $player.size; local.i++){
+			if (waitthread playerHasInventory $player[local.i]){
+				thread addWeaponToInventory $player[local.i] local.model
+			}	
+		}	
+	}
+}end
+
+//adds weapon model to their inventory array
+//=========================================================================
+addWeaponToInventory local.player local.model local.pickup local.ammo:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/addWeaponToInventory->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (level.gametype == 0){ end }
+
+	if (waitthread playerHasWeapon local.player local.model){
+		end
+	}
+	if (local.pickup && waitthread isCarryingAmmoType local.player local.ammo){
+		end //this stops weapons of same ammo type being removed from our inv if we pick one up in level
+	}
+
+	local.model = waitthread makeWeaponStringValid local.model
+
+	if (waitthread notStartGrenade local.model){
+		local.ammoType = waitthread getAmmoType local.model
+	}
+	
+	for (local.i = 1; local.i <= local.player.flags["coop_inventoryWeapons"].size; local.i++){
+		local.invWeapon = local.player.flags["coop_inventoryWeapons"][local.i]
+		if (waitthread notStartGrenade local.invWeapon){		
+			if (local.ammoType == (waitthread getAmmoType local.invWeapon)){ //we can't have two weapons of the same ammo type
+				//println "REMOVING " local.invWeapon
+				waitthread removeWeaponFromInventory local.player local.invWeapon
+				break
+			}
+		}
+	}
+	local.weaponIndex = (local.player.flags["coop_inventoryWeapons"].size + 1)
+	local.player.flags["coop_inventoryWeapons"][local.weaponIndex] = local.model	
+}end
+
+//new, more robust version
+//=========================================================================
+isCarryingAmmoType local.player local.ammoType:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/isCarryingAmmoType->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (waitthread playerHasInventory local.player){
+		for (local.i = 1; local.i <= local.player.flags["coop_inventoryWeapons"].size; local.i++){
+			local.weap = local.player.flags["coop_inventoryWeapons"][local.i]
+			if (waitthread notStartGrenade local.weap){
+				if ((waitthread getAmmoType local.weap) == local.ammoType){
+ 					end(game.true)
+				}
+			}
+		}
+	}
+}end(game.false)
+
+//add weapon to the inventories of all active players
+//=========================================================================
+removeWeaponFromAllInventories local.model:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/removeWeaponFromAllInventories->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (level.gametype == 0){ end }
+
+	if ($player){
+		for (local.i = 1; local.i <= $player.size; local.i++){
+			thread removeWeaponFromInventory $player[local.i] local.model
+		}	
+	}
+}end
+
+//removes weapon model from their inventory array
+//=========================================================================
+removeWeaponFromInventory local.player local.model:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/removeWeaponFromInventory->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (level.gametype == 0){ end }
+
+	if (!waitthread playerHasWeapon local.player local.model){
+		end
+	}
+
+	local.model = waitthread makeWeaponStringValid local.model
+
+	local.oldArray 		= local.player.flags["coop_inventoryWeapons"]
+	local.newArray[1] 	= NIL
+	local.j = 1
+	for(local.i = 1; local.i <= local.oldArray.size; local.i++){
+		local.weaponModel = local.oldArray[local.i]
+		if(local.weaponModel != local.model){
+			local.newArray[local.j] = local.weaponModel
+			local.j++
+		}
+	}
+	local.player.flags["coop_inventoryWeapons"] = local.newArray
+	
+}end
+
+//removes weapon from the loadout array.
+//this is to change default spawn loadouts for fresh spawns if a map
+//requires this. 
+//=========================================================================
+removeWeaponFromLoadout local.model:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/removeWeaponFromLoadout->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (level.gametype == 0){ end }
+
+	if (waitthread isWeaponClass local.model){
+		local.class = local.model
+		local.model = waitthread returnWeaponClassFromLoadout local.class
+		if (!local.model){
+			println "(coop_mod/itemhandler.scr::removeWeaponFromLoadout): no weapon of class " local.class " in loadout array"
+			end
+		}
+	}else{
+		local.model = waitthread makeWeaponStringValid local.model
+	}
+
+	local.oldArray 		= level.coop_weaponLoadout
+	local.newArray[1] 	= NIL
+	local.j = 1
+	for(local.i = 1; local.i <= local.oldArray.size; local.i++){
+		local.weaponModel = local.oldArray[local.i]
+		if(local.weaponModel != local.model){
+			local.newArray[local.j] = local.weaponModel
+			local.j++
+		}
+	}
+	level.coop_weaponLoadout = local.newArray
+
+	if (level.coop_weaponLoadout.size == 0){
+		println "(coop_mod/itemhandler.scr::removeWeaponFromLoadout): *ERROR* - there are no weapons in loadout!"
+	}
+}end
+
+//adds weapon to the loadout array.
+//this is to change default spawn loadouts for fresh spawns if a map
+//requires this. 
+//=========================================================================
+addWeaponToLoadout local.model:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/addWeaponToLoadout->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (level.gametype == 0){ end }
+
+	local.model = waitthread makeWeaponStringValid local.model
+
+	local.ammoType = waitthread getAmmoType local.model
+
+	for (local.i = 1; local.i <= level.coop_weaponLoadout.size; local.i++){
+		if (level.coop_weaponLoadout[local.i] == local.model){
+			end
+		}
+	}
+	for (local.i = 1; local.i <= level.coop_weaponLoadout.size; local.i++){
+		if (waitthread notStartGrenade level.coop_weaponLoadout[local.i]){
+			if (local.ammoType == (waitthread getAmmoType level.coop_weaponLoadout[local.i])){
+				waitthread removeWeaponFromLoadout level.coop_weaponLoadout[local.i]		
+				break
+			}		
+		}
+	}
+
+	local.weaponIndex = (level.coop_weaponLoadout.size + 1)
+	level.coop_weaponLoadout[local.weaponIndex] = local.model
+}end
+
+//adds ammo to the default loadout array for future players
+//=========================================================================
+addAmmoToLoadout local.ammoType local.amount:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/addAmmoToLoadout->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (level.coop_ammoLoadout[local.ammoType] == NIL){
+		level.coop_ammoLoadout[local.ammoType] = 0
+	}
+	level.coop_ammoLoadout[local.ammoType] += local.amount
+
+	if (level.coop_ammoLoadout[local.ammoType] < 0){
+		level.coop_ammoLoadout[local.ammoType] = 0
+	}
+}end
+
+//we need to have these - never remove!
+//=========================================================================
+notStartGrenade local.model:
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/notStartGrenade->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+end (local.model != "models/weapons/m2frag_grenade_sp_start.tik" && 
+	local.model != "models/weapons/steilhandgranate_start.tik" &&
+	local.model != "models/weapons/it_w_bomba_sp_start.tik") //[202] Smithy - some BT maps use this
+
+//=========================================================================
+returnWeaponClassFromLoadout local.class:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/returnWeaponClassFromLoadout->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	for (local.i = 1; local.i <= level.coop_weaponLoadout.size; local.i++){
+		local.invWeapon = level.coop_weaponLoadout[local.i]
+		if (waitthread notStartGrenade local.invWeapon){
+			if (waitthread getAmmoType local.invWeapon == local.class){
+				end(local.invWeapon)
+			}
+		}
+	}
+}end(NULL)
+
+//make sure the weapon string is the correct format
+//=========================================================================
+makeWeaponStringValid local.model:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/makeWeaponStringValid->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.model = waitthread coop_mod/strings.scr::to_lower local.model //convert it to lowercase
+
+	//make sure the models folder is included in the name
+	if (!waitthread coop_mod/main.scr::containsText local.model "models"){
+		local.model = ("models/" + local.model)
+	}
+}end(local.model)
+
+//checks if a player holds this weapon
+//=========================================================================
+playerHasWeapon local.player local.model:{ 
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/playerHasWeapon->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.weaponArray = local.player.flags["coop_inventoryWeapons"]
+	for (local.i = 1; local.i <= local.weaponArray.size; local.i++){
+		if (local.weaponArray[local.i] == local.model){
+			end(1)
+		}
+	}
+}end(0)
+
+//remove any remaining inventory entities if we have them
+//=========================================================================
+deletePreviousInvWeapons:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/deletePreviousInvWeapons->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.inventory = $("player"+group.player.entnum+"Inventory")
+	if (local.inventory){
+		local.inventory delete
+	}
+}end
+
+//initialises/resets all the weapon inventory flags for a player
+//=========================================================================
+resetPlayerWeapons local.player:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/resetPlayerWeapons->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (!local.player || local.player.classname != "Player"){ end }
+	local.player.flags["coop_inventoryWeapons"] 		= NIL
+	local.player.flags["coop_inventoryWeapons"][1]	= NIL
+}end
+
+//makes grenades work when picking them up by turning them into an AmmoEntity.
+//they now provide grenade ammo. but more specifically, their particular grenade ammo
+//(internal use only)
+//TODO: add any more ?
+//=========================================================================
+setupGrenades:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/setupGrenades->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (!group.item){ end }
+	
+	switch (group.model){
+		case "models/weapons/steilhandgranate.tik":
+			local.isGrenade 	= game.true
+			local.model 		= "weapons/steilhandgranate.tik"
+			local.name 			= "grenade" 	//axis nades
+			local.pickupSound 	= "steilhandgranate_snd_pickup_ammo"
+			break
+		case "models/weapons/m2frag_grenade_sp.tik":
+		case "models/weapons/m2frag_grenade.tik":
+			local.isGrenade 	= game.true
+			local.model 		= "weapons/m2frag_grenade.tik"
+			local.name 			= "agrenade"	//american nades
+			local.pickupSound 	= "m2frag_snd_pickup_ammo"
+			break
+		case "models/weapons/it_w_bomba.tik":
+			local.isGrenade 	= game.true
+			local.model 		= "weapons/it_w_bomba.tik"
+			local.name 			= "grenade" 	//axis nades
+			local.pickupSound 	= "sovietgrenade_snd_pickup_ammo"
+			break
+		default:
+			local.isGrenade 	= game.false
+			break
+	}
+
+	if (local.isGrenade){
+
+		local.item 		= group.item
+		local.velocity 	= local.item.velocity
+
+		local.granate 			= spawn AmmoEntity
+		local.granate.model 	= local.model
+		local.granate name local.name
+		local.granate amount 1
+		local.granate pickupsound local.pickupSound
+		local.granate.origin 	= group.origin
+		local.granate.angles 	= group.angles
+		local.granate.scale 	= group.scale
+
+		if (local.velocity != (0 0 0)){
+			local.granate glue local.item
+			local.granate.flags["coop_droppedItem"] = game.true
+			local.item hide
+			local.item nottriggerable
+			group.thread["initialiseItem"] end 		//stop the processing of the item even though the item still exists
+			waitthread waitTillLanded local.item
+
+		}
+		if (local.item){
+			local.item remove
+		}
+		waitframe
+	}
+}end
+
+//waits for an item to lose velocity (which means it has landed on something)
+//=========================================================================
+waitTillLanded local.item:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/waitTillLanded->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	while (local.item && local.item.velocity != (0 0 0)){
+		waitframe
+	}
+}end
+
+//drop specified item from actor on death
+//=========================================================================
+dropItemOnDeath local.item local.angles local.mass:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/dropItemOnDeath->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	self waittill death
+	waitframe
+
+	if (self){
+		thread dropItem local.item 1 "droppedItem" local.angles local.mass
+	}
+}end
+
+//sets the isDisguised flag.
+//this is called from weaponstate.scr when raising/putting away weapons
+//this is actually how it works in the engine.
+//hasDisguise is used to tell engine that the player is flagged for it.
+//isDisguised is whether they are ACTUALLY disguised.
+//isDisguised will turn on and off depending on whether they have a
+//weapon in their hand or not (plus other criteria like actor thinkstates)
+//=========================================================================
+setIsDisguised local.player local.bool local.forceState:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/setIsDisguised->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (local.player.flags["coop_hasDisguise"] || local.forceState){
+		local.player.flags["coop_isDisguised"] = local.bool
+	}
+}end
+
+//takes a diguise from a player
+//=========================================================================
+takeDisguise local.player:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/takeDisguise->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.threadName = "coop_mod/itemhandler.scr::takeDisguise"
+
+	if (local.player.has_disguise && local.player.flags["coop_hasDisguise"]){
+		waitthread coop_mod/main.scr::changeGameType 0 0
+		local.player.has_disguise 				= game.false
+		local.player.flags["coop_isDisguised"] 	= game.false
+		waitthread coop_mod/main.scr::changeGameType 2 game.ms
+	}
+}end
+
+//returns the weapon (if any) that a sentient is currently holding
+//only returns weapons - any other item (e.g. papers) will return NULL
+//=========================================================================
+returnActiveWeapon local.sentient:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/returnActiveWeapon->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.entnum = local.sentient.entnum
+	if (local.sentient.classname == "Player"){
+		local.tempName 	= ("player" + local.entnum + "ActiveItem")
+		local.reset 	= ("player" + local.entnum + "Inventory")
+	}else{
+		local.tempName 	= ("actor" + local.entnum + "ActiveItem")
+		local.reset 	= ""
+	}
+	local.sentient weaponcommand "dual" targetname local.tempName //as actors can sometimes have weapons in either hand when doing cover behavior
+	local.item = $(local.tempName)
+	if (local.item){
+		if (local.item.classname == "Weapon"){
+			local.item targetname local.reset
+		}else{
+			local.item targetname ""
+			local.item = NULL
+		}		
+	}else{
+		local.item = NULL
+	}
+}end (local.item)
+
+//creates a sound event emanating from specified entity
+//=========================================================================
+broadcastSound local.entity local.event local.radius:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/broadcastSound->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+
+	local.entity ai_event local.event local.radius
+
+	/*
+	Events to choose from:
+		"weapon_fire"
+		"weapon_impact"
+		"explosion"
+		"american_voice"
+		"german_voice"
+		"american_urgent"
+		"german_urgent"
+		"misc"
+		"misc_loud"
+		"footstep"
+		"grenade"
+
+	source: https://github.com/openmoh/openmohaa/blob/54355278307a64d2e62e68f8450aeb3cdf7651b3/code/game/g_utils.cpp#L1984
+	*/
+}end
+
+
+//gives a player the papers flag
+//=========================================================================
+givePapersFlag local.player:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/givePapersFlag->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.player.flags["coop_hasPapers"] = game.true
+}end
+
+//flags players that they have the papers. also stores papers in level var
+//for use on new players.
+//=========================================================================
+givePapersFlagToAll local.papers:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/givePapersFlagToAll->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	level.coop_itemPapers = local.papers
+	for (local.i = 1; local.i <= $player.size; local.i++){
+		thread givePapersFlag $player[local.i]
+	}
+}end
+
+//allows a player to click to open papers, but only when being asked for them.
+//this is called from the anim/disguise scripts on the player being interrogated
+//and if papers are accepted or declined (or the guard dies) stop this.
+//this is just a bonus feature because messing with num keys can be a pain.
+//it will also stop any bugs that can happen when holding multiple items.
+//e.g when you have binoculars AND papers, pressing 7 opens binocs.
+//=========================================================================
+enableClickablePapers local.guard local.player:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/enableClickablePapers->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (!local.player.flags["coop_hasPapers"]){ end }
+
+	if (!local.player.flags["coop_clickPapersHint"]){
+		local.player.flags["coop_clickPapersHint"] = game.true
+		local.player iprint ("When being asked for papers, you can press (PRIMARY FIRE) to show them.") 1
+	}
+
+	local.player.flags["coop_clickablePapersEnabled"] = game.true
+	while (isAlive local.player && local.player.flags["coop_clickablePapersEnabled"] && isAlive local.guard){
+		if (local.player.primaryfireheld && local.player.flags["coop_activeWeapon"] == NULL){
+			local.player use level.coop_itemPapers
+			/*
+			wait game.ms
+			local.player weaponcommand dual targetname ("player" + local.player.entnum + "papers")
+			local.papers = $("player" + local.player.entnum + "papers")
+			local.papers surface papers "-nodraw"
+			*/
+			wait 3
+		}
+		waitframe
+	}
+	if (local.player){
+		local.player.flags["coop_clickablePapersEnabled"] = game.false
+	}
+}end
+
+//used to replace taking weapons from players (take commands)
+//this is so we can keep track of their inventory
+//this is called from replace.scr::takePlayerWeapon
+//=========================================================================
+takePlayerWeapon local.model:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/takePlayerWeapon->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.threadName = "coop_mod/itemhandler.scr::takePlayerWeapon"
+	local.player = self
+
+	//ok, we can take weapon of particular class from player now
+	if (waitthread isWeaponClass local.model){
+		local.class = local.model
+		local.model = waitthread getWeaponOfClassFromPlayer local.player local.class
+		if (!local.model){
+			println "(" local.threadName "): " local.player.netname " is not holding a weapon of class " local.class
+			end //this means the player isn't holding a weapon of this class - so it's safe to give him a weapon!
+		}
+	}
+
+	local.activeWeapon = thread returnActiveWeapon local.player
+	if (local.activeWeapon){
+		local.activeModel = local.activeWeapon.model
+	}
+	
+	if (local.activeModel && local.activeModel == local.model){
+		local.player.flags["coop_takenActiveWeapon"] = game.true
+	}
+
+	local.player take local.model
+
+	//take the weapon from everyone's inventories and default loadout so current and future players will not have this
+	//thread removeWeaponFromEveryone local.model
+	thread removeWeaponFromInventory local.player local.model
+}end
+
+//used to replace giving weapons to players via scripts (item and give commands)
+//this is so we can use gametype hack and keep track of their inventory
+//this is called from replace.scr::givePlayerWeapon
+//=========================================================================
+givePlayerWeapon local.model:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/givePlayerWeapon->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.threadName = "coop_mod/itemhandler.scr::givePlayerWeapon"
+	local.player = self
+
+	//check that the player is not already holding a weapon of this class
+	local.class = waitthread getAmmoType local.model
+	if (waitthread isCarryingAmmoType local.player local.class){
+			println "(" local.threadName "): " local.player.netname " is already holding a weapon of class " local.class " - you must take this from him first!"
+			end //we can't have two weapons of the same ammo type in their inventory
+	}
+	
+	local.item 	= spawn local.model targetname ("player" +  local.player.entnum + "Inventory")
+	local.item notsolid
+	local.item nottriggerable
+	local.item hide
+	local.item.flags["coop_playerNewWeapon"] = game.true
+	local.item.flags["coop_itemOwner"] = local.player
+	local.item notdroppable
+
+	wait game.ms
+
+	if (!isAlive local.player || local.player.isSpectator){ 
+		local.item remove    //stop any potential memory leaks
+		end 
+	}
+	
+	local.item triggerable
+	waitthread coop_mod/main.scr::changeGameType 0 0
+	local.item triggereffect local.player
+	waitthread coop_mod/main.scr::changeGameType 2 0
+
+	//give the weapon to everyone's inventories and default loadout so current and future players will have this
+	//thread addWeaponToEveryone local.model
+	if (waitthread playerHasInventory local.player){
+		thread addWeaponToInventory local.player local.model
+	}	
+}end
+
+//makes a player use a weapon with optional delay
+//we've abstracted it so delays are 'multithreaded'
+//=========================================================================
+usePlayerWeapon local.model local.wait:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/usePlayerWeapon->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.player = self
+	local.player.flags["coop_takenActiveWeapon"] = game.false
+
+	if (local.wait){ wait (float(local.wait)) }
+	
+	if (isAlive local.player && local.player.dmteam == "allies"){
+		local.player use local.model
+	}
+}end
+
+//Get the weapon type of this weapon
+//=========================================================================
+getAmmoType local.model:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/getAmmoType->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.model = waitthread makeWeaponStringValid local.model
+
+	switch (local.model){
+		case "models/weapons/colt45.tik":
+		case "models/weapons/p38.tik":
+		case "models/weapons/silencedpistol.tik":
+		case "models/weapons/webley_revolver.tik":
+		case "models/weapons/it_w_beretta.tik":
+		case "models/weapons/nagant_revolver.tik":
+		case "models/weapons/delisle.tik":
+			end("pistol")
+		case "models/weapons/bazooka.tik":
+		case "models/weapons/panzerschreck.tik":
+		case "models/weapons/uk_w_piat.tik":
+			end("heavy")
+		case "models/weapons/mp44.tik":
+		case "models/weapons/bar.tik":
+		case "models/weapons/uk_w_vickers.tik":
+		case "models/weapons/it_w_breda.tik":
+			end("mg")
+		case "models/weapons/shotgun.tik":
+			end("shotgun")
+		case "models/weapons/springfield.tik":
+		case "models/weapons/kar98.tik":
+		case "models/weapons/kar98sniper.tik":
+		case "models/weapons/m1_garand.tik":
+		case "models/weapons/it_w_carcano.tik":
+		case "models/weapons/svt_rifle.tik":
+		case "models/weapons/mosin_nagant_rifle.tik":
+		case "models/weapons/g43.tik":
+		case "models/weapons/enfield.tik":
+		case "models/weapons/uk_w_l42a1.tik":
+			end("rifle")
+		case "models/weapons/thompsonsmg.tik":
+		case "models/weapons/mp40.tik":
+		case "models/weapons/sten.tik":
+		case "models/weapons/ppsh_smg.tik":
+		case "models/weapons/it_w_moschetto.tik":
+			end("smg")
+		case "models/weapons/us_w_minedetector.tik":
+		case "models/weapons/gr_w_minedetector.tik":
+			end("landmine")
+		case "models/weapons/it_w_bomba.tik":
+		case "models/weapons/steilhandgranate.tik":
+			end("grenade")
+		case "models/weapons/m2frag_grenade.tik":
+			end("agrenade")
+	}
+	println "(coop_mod/itemhandler.scr::getAmmoType): *WARNING* - " local.model " not on list. Add it!"
+}end("unknown")
+
+//check if the string is a weapon class
+//=========================================================================
+isWeaponClass local.string:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/isWeaponClass->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	switch (local.string){
+		case "pistol":
+		case "heavy":
+		case "mg":
+		case "shotgun":
+		case "rifle":
+		case "smg":
+		case "landmine":
+		case "grenade":
+		case "agrenade":
+			end(game.true)
+	}
+}end(game.false)
+
+//returns the weapon of class specified from player inventory if he has one
+//=========================================================================
+getWeaponOfClassFromPlayer local.player local.class:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/getWeaponOfClassFromPlayer->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (waitthread playerHasInventory local.player){
+		for (local.i = 1; local.i <= local.player.flags["coop_inventoryWeapons"].size; local.i++){
+			local.invWeapon = local.player.flags["coop_inventoryWeapons"][local.i]
+			if (waitthread notStartGrenade local.invWeapon){
+				if (waitthread getAmmoType local.invWeapon == local.class){
+					end(local.invWeapon)
+				}
+			}
+		}
+	}
+}end(NULL)
+
+//[200] Smithy - taken from main, makes more sense here
+//=========================================================================
+isWeaponModel local.model:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/isWeaponModel->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+}end(waitthread coop_mod/main.scr::containsText local.model "weapons/")
+
+//[200] Smithy - taken from main, makes more sense here
+//=========================================================================
+isPrimaryWeapon local.weapon:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/isPrimaryWeapon->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if(local.weapon == "" || local.weapon == NIL){ end(game.false) }
+
+	//[200] Smithy - more efficient + looks nicer
+	switch (local.weapon){
+		case "models/weapons/us_w_minedetector.tik":
+		case "models/weapons/gr_w_minedetector.tik":
+		case "models/weapons/bar.tik":
+		case "models/weapons/bazooka.tik":
+		case "models/weapons/kar98.tik":
+		case "models/weapons/kar98sniper.tik":
+		case "models/weapons/m1_garand.tik":
+		case "models/weapons/mp40.tik":
+		case "models/weapons/mp44.tik":
+		case "models/weapons/panzerschreck.tik":
+		case "models/weapons/shotgun.tik":
+		case "models/weapons/springfield.tik":
+		case "models/weapons/thompsonsmg.tik":
+		case "models/weapons/it_w_moschetto.tik":
+		case "models/weapons/it_w_breda.tik":
+		case "models/weapons/uk_w_l42a1.tik":
+		case "models/weapons/uk_w_piat.tik":
+		case "models/weapons/uk_w_vickers.tik":
+		case "models/weapons/enfield.tik":
+		case "models/weapons/g43.tik":
+		case "models/weapons/mosin_nagant_rifle.tik":
+		case "models/weapons/ppsh_smg.tik":
+		case "models/weapons/svt_rifle.tik":
+		case "models/weapons/sten.tik":
+			end(game.true)
+	}
+}end(game.false)
+
+//disable weapons on the weapon select menu
+//=========================================================================
+disableAllWeaponsOnMenu:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/disableAllWeaponsOnMenu->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	/*
+	4194304 //rifle (1 << 22) 
+	8388608 //sniper (1 << 23)
+	16777216 //smg (1 << 24)
+	33554432 //mg (1 << 25)
+	67108864 //rocket (1 << 26)
+	134217728 //shotgun (1 << 27)
+	268435456 //landmine (1 << 28)
+	*/
+	setcvar dmflags 532676608
+}end
+
+//remove any start ammo that is added by the default tiki
+//=========================================================================
+removeAdditionalStartAmmo:{
+//=========================================================================
+if(level.cMTE_coop_itemhandler){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread itemhandler/removeAdditionalStartAmmo->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (self.classname != "Weapon" || !waitthread notStartGrenade self.model){ end }
+	if (self.flags["coop_removedStartAmmo"]){ end }
+
+	self.flags["coop_removedStartAmmo"] = game.true
+	
+	self additionalstartammo "grenade" 6
+	self additionalstartammo "smokegrenade" 6
+	self additionalstartammo "grenade" -6
+	self additionalstartammo "smokegrenade" -6
+}end
+

@@ -1,0 +1,809 @@
+//============================================================
+InitIntro: {
+//============================================================
+	$spy exec global/disable_ai.scr
+	$spy german
+	$spy gun "none"
+	$spy rendereffects "-shadow"
+	//$spy anim jeep_idle_drive
+
+	// Crimewavez = Only in SP.
+	// Disguise managed in e1l4.scr, line 7.
+	//[200] chrissstrahl - we are using the replacment in any case, so that if we get it working in the future all scripts are prepared
+	//[202] Smithy - we don't need a replacement for has_disguise now. itemhandler sorts this out.
+	if (!level.gametype){
+		$player.has_disguise = 1
+	}
+
+	waitthread AIdisable
+	level.RideOver = 0
+}end
+
+//============================================================
+AIdisable: {
+//============================================================
+	$clerk ai_off
+	$clerkbuddy ai_off
+	$boatguard  ai_off
+	
+	for(local.j = 1; local.j < $deleteguy2.size; local.j++) {
+		$deleteguy2[local.j] ai_off
+	}
+
+	for(local.i = 1; local.i < $ai_alarm.size; local.i++) {
+		$ai_alarm[local.i] ai_off
+	}
+}end
+
+//============================================================
+DoIntro: {
+//============================================================
+	if (level.skipintro == 1) {
+		println "DEBUG:  skipping intro"
+		thread giveDisguise
+		$player.origin = "-4360 4696 96"
+		waitthread AIenable
+		thread DeleteGuy1
+		end
+	}
+
+	drawhud 0
+	thread handleDriver
+	waitthread handlePlayer //[202] Smithy - wait for this to finish now we add a wait
+	thread startTruckLightsCheck
+
+	$starttruck thread startTruckOptions
+	$starttruck rendereffects "+growradius"
+	$starttruck drive $starttruckpath 300 200 200 128		//256
+	
+	//[202] chrissstrahl - speed up for testing
+	thread coop_mod/developer.scr::timescale 8
+
+	//call to briefing dialogue
+	thread doBriefing
+	//thread global/MaintainCamera.scr::StartMaintainCamera $starttruck //[202] Smithy - we do our own camera stuff now	
+	thread handleTruckGag
+		
+	//wait until the briefing is done before we continue
+	waitframe
+	$starttruck waittill drive
+
+	waitthread GateGuardDialogue
+	
+	//[200] chrissstrahl - we can't trust a player to be there, so open differently
+	//$gate1 open $player
+	$gate1 open $starttruck
+
+	wait 2.0
+	$starttruck drive $gatetruckpath 300 200 200 128		//256
+
+	wait 5
+	$gate1 close
+
+	//waitframe
+	$starttruck waittill drive
+	waitthread doBriefing2
+	level.Introdrivedone = 1	
+
+	thread DontBeCaught
+	
+	// Hand the player the gun
+	//[200] chrissstrahl - force weapon in coop
+	//[202] Smithy - papers can be given with replace.scr::item as usual. my give replacements are just for weapons on players. 
+	//don't worry too much about adding stealth to maps now. this is the last stealth mission left to do (no more in BT, and none were in SH)
+	//taking the pistol below, for example, would be thread coop_mod/replace.scr::takePlayerWeapon "models/weapons/silencedpistol.tik"
+	if(level.gametype == 0){
+		$player item weapons/silencedpistol.tik  
+		$player ammo pistol 16	
+	}else{
+		thread coop_mod/replace.scr::givePlayerWeapon "models/weapons/silencedpistol.tik" 	//[202] Smithy - give current and future players the weapon
+		thread coop_mod/replace.scr::ammo pistol 32
+	}
+	
+	$starttruck setcollisionentity $truckcollide
+	thread maps/e1l4/PreShip.scr::DontMoveUnlessIAmNear
+}end
+
+//============================================================
+doBriefing: {
+//============================================================
+	$spy say A_14_ClausTalk01   //we are going to the...
+	$spy waittill saydone
+	$spy say A_14_ClausTalk02  //we must have those plans...
+	$spy waittill saydone
+	$spy say A_14_ClausTalk03  //sink da boat...
+	$spy waittill saydone
+}end
+
+//============================================================
+doBriefing2:{
+//============================================================
+	$spy say A_14_ClausTalk04  //these papers will...
+	$spy waittill saydone
+	$spy say A_14_Klaus_1A  // after you sabotage...
+	$spy waittill saydone
+}end
+	
+//============================================================
+DontBeCaught: {
+//============================================================
+	for(local.i = 1; local.i <= $deleteguy2.size; local.i++) {
+		$deleteguy2[local.i] dontdropweapons
+	}
+}end
+
+//============================================================
+IfPullGunFail: {
+//============================================================
+	self dontdropweapons
+	
+	while(self && self.thinkstate != "attack") {
+		wait 1.0
+
+		if(level.failongun == 0) { end }
+	}
+
+	if(self) {
+		thread FAILEDMISSION
+	}
+}end
+
+//============================================================
+FAILEDMISSION: {
+//============================================================
+	if(level.FAILEDMISSION == 1) {
+		End
+	}
+
+	level.FAILEDMISSION = 1
+	level.sirenson = 1
+	wait 2
+	
+	iprintln "You've blown your cover without getting on the ship!"
+	wait 3
+	
+	iprintln "MISSION FAIL"
+
+	//[202] chrissstrahl
+	thread coop_mod/replace.scr::missionfailed
+}end
+
+//============================================================
+DeleteGuy1: {
+//============================================================
+	thread global/EntityCleanup.scr::EntityCleanup "pathintalkers0" 1
+	thread global/EntityCleanup.scr::EntityCleanup "t375" 1
+	thread global/EntityCleanup.scr::EntityCleanup "t375_passenger" 1
+	thread global/EntityCleanup.scr::EntityCleanup "deleteguy1" 1
+	thread global/EntityCleanup.scr::EntityCleanup "1stgateguard" 1
+}end
+
+//[202] chrissstrahl - do not let player wait during coop
+//============================================================
+coop_GateGuardDialogue:{
+//============================================================
+	$spy anim A_14_Claus_show_papers
+	$spy waittill animdone
+	$spy anim A_14_Claus_Opel_idle
+
+	if(level.GatePapersAccepted != 1) {
+		$1stgateguard say A_14_GermATalk2    //and you sir?
+		$1stgateguard waittill say
+	}
+}end
+
+//============================================================
+GateGuardDialogue: {
+//============================================================
+	//[202] chrissstrahl - slow down for testing
+	thread coop_mod/developer.scr::timescale 1
+
+	// Crimewavez - only in SP, again.
+	if(level.gametype == 0) {
+		// "press 7 to show your papers" throbbing text...	
+		local.key = getboundkey1 "toggleitem"
+		local.string = (loc_convert_string ("Press " + local.key + " to show your papers."))
+		thread global/throbtext.scr::throbtext local.string 9999
+	}
+	//[200] chrissstrahl - show this also in coop
+	else{
+		local.string = (loc_convert_string ("Show your papers.")) //bitch! :D
+		thread global/throbtext.scr::throbtext local.string 9999
+	}
+	//[200] chrissstrahl - allow player to show papers
+	exec coop_mod/replace.scr::physics_on
+
+	$starttruck setcollisionentity $truckcollide2
+
+
+	//[202] chrissstrahl - make compatrible with coop
+	//local.placetospawn = $player.origin + (0 -1000 0)
+	local.placetospawn = ( -5585.637695 5091.588867 53.654541 )
+	local.person = spawn models/human/german_wehrmact_soldier.tik origin local.placetospawn "targetname" "mrinvisible2"
+	local.person hide
+	$mrinvisible2.shuddup = 1
+	$mrinvisible2 exec global/enable_ai.scr
+	$mrinvisible2 notsolid
+	$mrinvisible2 exec coop_mod/replace.scr::turnto //[202] chrissstrahl
+	$mrinvisible2.origin = $spy.origin + (0 0 -50)
+	$mrinvisible2 waitthread askForPapers
+
+	thread KillPlayerIfFailPapers
+
+	//$1stgateguard playsound DFRGM_E1L4_CK3408 //use your uniform...
+	$1stgateguard turnto $spy
+    //$1stgateguard waittill turntodone
+	$1stgateguard say A_14_GermATalk1    //I need to see papers for both of you
+	$1stgateguard waittill saydone
+
+	//[202] chrissstrahl - allow to show papers right away in coop (makes this a lil faster)
+	if(level.gametype == 0){
+		waitthread coop_GateGuardDialogue
+	}else{
+		thread coop_GateGuardDialogue
+	}
+
+	//$1stgateguard waitthread askForPapers
+	//thread keepAskingtillSeePapers
+	while(level.GatePapersAccepted != 1) { wait 0.3 }
+	
+	//[202] chrissstrahl - speedup for testing
+	thread coop_mod/developer.scr::timescale 5
+	
+	//[202] Smithy - TODO: look into showing papers being pulled out
+	//[200] chrissstrahl - make sure players work fine with being glued again
+	exec coop_mod/replace.scr::physics_off
+
+	$1stgateguard anim A_14_GermATalk4    //if you want to board the boat you will have to see the HM
+	$1stgateguard waittill animdone
+	$spy lookat NULL
+	//$spy waitthread global/LoopAnim.scr::LoopAnimStop
+    //$spy anim jeep_idle_drive //00A004_driversitstill
+	$mrinvisible2 remove
+}end
+
+//============================================================
+KillPlayerIfFailPapers: {
+//============================================================
+	//while ($1stgateguard && (isalive $1stgateguard) &&
+	//($1stgateguard.thinkstate != "attack")) { wait 1 }
+	//[200] chrissstrahl - make this less confusing
+	while ( (isalive $1stgateguard) && ($1stgateguard.thinkstate != "attack")) {
+		wait 1
+	}
+	
+	if (!$1stgateguard || !(isalive $1stgateguard)) { end }
+	wait 1
+
+	if (level.GatePapersAccepted != 1){
+		waitthread global/throbtext.scr::throbtext_off
+		waitframe
+		
+		//[202] chrissstrahl - coop compatibility
+		exec coop_mod/replace.scr::killplayer
+		
+		//[202] chrissstrahl - fail mission in coop
+		if(level.gametype != 0){
+			exec coop_mod/replace.scr::missionfailed
+		}
+	}
+}end
+
+//============================================================
+keepAskingtillSeePapers: {
+//============================================================
+	//	thread HACK
+	while(level.GatePapersAccepted != 1) {
+		$1stgateguard anim A_14_GermATalk3
+		$1stgateguard waittill animdone
+		wait 10
+	}
+}end
+
+//============================================================
+HACK: {
+//============================================================
+	wait 6
+	if(level.GatePapersAccepted != 1) {
+		level.GatePapersAccepted = 1
+	}
+}end
+
+//[202] Smithy - this is fine
+//============================================================
+askForPapers: {
+//============================================================
+	self disguise_level 1
+	self disguise_period 60
+	self disguise_range 3000
+	self type_attack alarm
+	self type_disguise sentry
+	self disguise_accept_thread papersAccepted
+	
+	//wait 2
+	self exec global/enable_ai.scr
+}end
+
+//============================================================
+papersAccepted: {
+//============================================================
+	thread global/throbtext.scr::throbtext_off
+	level.GatePapersAccepted = 1
+	waitthread AIenable
+}end
+
+//============================================================
+AIenable: {
+//============================================================
+	$clerk ai_on
+	$clerkbuddy ai_on
+	$boatguard  ai_on
+	
+	for(local.j = 1; local.j < $deleteguy2.size; local.j++) {
+		$deleteguy2[local.j] ai_on
+	}
+
+	for(local.i = 1; local.i < $ai_alarm.size; local.i++) {
+		$ai_alarm[local.i] ai_on
+	}
+}end
+
+//============================================================
+giveDisguise: {
+//============================================================
+	// Crimewavez - coop comp.
+	// Disguise managed in e1l4.scr, line 7.
+	if(level.gametype == 0) {
+		$player playsound pickup_papers
+		$player playsound pickup_uniform
+		waitthread global/items.scr::add_item "papers_level1" noMessage
+		$player.has_disguise = 1
+		setcvar g_playermodel "Sc_AX_Ital_Inf" 
+	}
+	else {
+		//[202] Smithy - note: has_disguise is added by itemhandler.scr on spawn
+		
+		exec coop_mod/replace.scr::playsound "pickup_papers"
+		exec coop_mod/replace.scr::playsound "pickup_uniform"
+		waitthread global/items.scr::add_item "papers_level1" noMessage
+	}
+}end
+
+//============================================================
+handleDriver: {
+//============================================================
+	$spy physics_off
+	$spy notsolid
+	$spy nodamage
+	$spy angles (0 0 0)
+	$spy attach $starttruck driver 1 
+	//	$spy anim jeep_idle_drive //00A004_driversitstill
+	$spy gun "none"	
+	$spy thread driverDriveStraight
+}end
+
+//animations for Claus as he drives ye olde truck 
+//============================================================
+driverTurnLeft local.degrees: {
+//============================================================
+	if (level.inLeftTrun == 1) { end }
+	level.inLeftTurn = 1
+	$spy anim A_13_driver_turnleft
+	$spy waittill animdone
+	level.inLeftTurn = 0
+}end
+
+//============================================================
+driverTurnRight local.degrees: {
+//============================================================
+	if (level.inRightTurn == 1) { end }
+	level.inRightTurn = 1
+	$spy anim A_13_driver_turnright
+	$spy waittill animdone
+	level.inRightTurn = 0 
+}end
+
+//============================================================
+driverDriveStraight: {
+//============================================================
+	if (level.driverDrivingStraight == 1) { end }
+	level.driverDrivingStraight = 1
+	$spy thread global/loopanim.scr::LoopAnim A_13_driver_drive
+}end
+
+//============================================================
+driverStopDriving: {
+//============================================================
+	$spy thread global.loopanim.scr::LoopAnimStop
+	level.driverDrivingStraight = 0
+}end
+
+//============================================================
+handlePlayer: {
+//============================================================
+	thread giveDisguise
+	level.opelpassengerseat = spawn script_origin
+	local.seatpos = $starttruck gettagposition "passenger"
+	local.seatpos[2] -= 45 										//[202] Smithy - hmm, we could learn from this to stop jitter, as we don't do much different in jeep missions...
+	level.opelpassengerseat.origin = local.seatpos
+	level.opelpassengerseat bind $starttruck
+	
+	waitframe //[202] Smithy - lets check this makes smoothness more consistent.
+
+	//Crimewavez - coop comp, see replace.scr and SDK in case of questions.
+	if(level.gametype == 0) {
+		$player nodamage
+		$player notsolid
+		//	$player physics_off
+		$player glue level.opelpassengerseat
+		$player.viewangles = (0 180 0)
+	}
+	else {
+		for(local.i = 1; local.i <= $player.size; local.i++){
+			local.player = $player[local.i]
+			local.player nodamage
+			local.player notsolid
+			//local.player physics_off
+		}
+		thread coop_mod/replace.scr::physics_off
+		thread coop_mod/replace.scr::glue level.opelpassengerseat
+		thread coop_mod/replace.scr::viewangles (0 180 0)
+		thread coop_mod/replace.scr::hide
+		thread coop_startTruckSpawnManager //[202] Smithy
+	}
+}end
+
+//[202] Smithy
+//fixes players spawning in truck as solid thus being blocked
+//and killed
+//============================================================
+coop_startTruckSpawnManager:{
+//============================================================
+	if (level.thread["coop_startTruckSpawnManager"]){ end }
+	
+	level.thread["coop_startTruckSpawnManager"] = local
+
+	//level.cameraModel = spawn models/miscobj/cameranull.tik
+	//level.cameraModel notsolid
+	//level.cameraModel physics_off
+	//level.cameraModel angles $starttruck.angles
+	//level.cameraModel.origin = level.opelpassengerseat.origin
+	//level.cameraModel glue level.opelpassengerseat
+	
+	//[202] Smithy - spawn any cameras we need for players that may have spawned before the handler started
+	for (local.i = 1; local.i <= $player.size; local.i++){
+		group.player = $player[local.i]
+		if (!group.player.truckCamera){
+			println("ADDING PLAYER TO CAM (coop_startTruckSpawnManager)")
+			thread coop_spawnTruckCamera
+		}
+	}
+	
+	waitframe
+	thread coop_handleTruckCameras
+	
+	while (1){
+		level waittill playerspawn
+		group.player = parm.other
+		if (!group.player.isSpectator && !level.RideOver){				
+			thread coop_spawnTruckCamera
+			group.player notsolid
+			group.player nodamage
+		}
+	}
+}end
+
+//[202] Smithy
+//============================================================
+coop_handleTruckCameras:{
+//============================================================
+	if (level.thread["coop_handleTruckCameras"]){ end }
+	level.thread["coop_handleTruckCameras"] = local
+
+	local.oldJeepAngles = $starttruck.angles
+	while (!level.RideOver) {
+		if ($truckCamera){
+			for (local.i = 1; local.i <= $truckCamera.size; local.i++){
+				local.cam = $truckCamera[local.i]
+				group.player = local.cam.player
+				
+				if (isAlive group.player && !group.player.isSpectator){
+					if (!group.player.inTruckCamera){
+						thread coop_startTruckCamera					
+					}			
+				}else{
+					if (group.player && group.player.inTruckCamera){
+						thread coop_stopTruckCamera
+					}
+					local.cam waitthread game.replace::delete
+					local.i = 0
+					continue
+				}
+				local.deltaAngles = $starttruck.angles - local.oldJeepAngles
+				local.cam.angles = group.player.viewangles + local.deltaAngles		
+			}			
+		}
+		local.oldJeepAngles = $starttruck.angles
+		waitframe
+	}
+}end
+
+//[202] Smithy
+//============================================================
+coop_stopTruckSpawnManager:{
+//============================================================
+	if (level.thread["coop_handleTruckCameras"]){
+		//iprintlnbold_noloc("DELETING coop_handleTruckCameras") 
+		level.thread["coop_handleTruckCameras"] delete 
+	}
+	if (level.thread["coop_startTruckSpawnManager"]){ 
+		//iprintlnbold_noloc("DELETING coop_startTruckSpawnManager") 
+		level.thread["coop_startTruckSpawnManager"] delete
+	}
+	if ($truckCamera){
+		$truckCamera delete
+	}
+	if (level.cameraModel){
+		level.cameraModel delete
+	}
+}end
+
+//[202] Smithy - spawn a camera for a player and set it up in truck
+//============================================================================
+coop_spawnTruckCamera:
+//============================================================================	
+	if (!level.RideOver && !group.player.truckCamera){
+		local.cam = spawn Camera targetname truckCamera 	//give them all the same name so they are handled in the targetname array
+		local.cam showquakes 1
+		local.cam.origin = level.opelpassengerseat.origin + (0 0 80)
+		local.cam bind level.opelpassengerseat
+		local.cam.player = group.player
+		group.player.truckCamera = local.cam
+		group.player.oldViewAngles = group.player.viewangles		
+	}
+end
+
+//[202] Smithy - make them look through their truck camera
+//============================================================================
+coop_startTruckCamera:{
+//============================================================================	
+	if (!level.RideOver && group.player.truckCamera && !group.player.inTruckCamera){
+		group.player.inTruckCamera = game.true
+		
+		group.player notsolid
+		group.player hide
+			
+		local.name = ("truckCamera_" + group.player.entnum)
+		local.cam = group.player.truckCamera
+		local.cam targetname local.name
+		
+		local.camerause = spawn trigger_camerause target local.name
+		local.camerause doUse group.player
+		local.camerause delete
+		
+		//[202] Smithy - set targetname back to original so it gets added back to the array
+		local.cam targetname "truckCamera"
+	}
+}end
+
+//[202] Smithy - make them look through their truck camera
+//============================================================================
+coop_stopTruckCamera:{
+//============================================================================	
+	if (!level.RideOver && group.player.truckCamera && group.player.inTruckCamera){
+		group.player.inTruckCamera = game.false
+			
+		local.name = ("truckCamera_" + group.player.entnum)
+		local.cam = group.player.truckCamera
+		local.cam targetname local.name
+		
+		local.camerause = spawn trigger_camerause target local.name	
+		local.camerause doUse group.player
+		local.camerause delete
+		
+		//[202] Smithy - set targetname back to original so it gets added back to the array
+		local.cam targetname "truckCamera"
+	}
+}end
+
+//============================================================
+startTruckLightsCheck:	{
+//============================================================
+	if (level.startTruckLights == 1 && level.RideOver == 0) {
+		$starttruck vehicleanim idlelights
+	}
+	else {
+		$starttruck vehicleanim idlenolights 
+	}
+}end
+
+//============================================================
+handleTruckGag:	 {
+//============================================================
+    thread intro_truck_jitter
+
+	while(level.Introdrivedone != 1) { wait 0.2 }
+	
+	$starttruck.corona = 0  //turn off coronas
+	waitframe
+
+	$starttruck moveanim passengerdooropen
+	//[202] chrissstrahl - coop compatibility
+	//exec coop_mod/replace.scr::playsound  opeltruck_snd_dooropen //sound when player opens door
+	//$player playsound opeltruck_snd_dooropen //sound when player opens door
+	$starttruck playsound opeltruck_snd_dooropen //sound when player opens door
+	wait 0.5
+	
+	//[202] chrissstrahl - coop compatibility
+	$starttruck playsound opeltruck_snd_doorclose  //sound when player closes door
+	waitthread DeleteGuy1
+	thread PlayerExitVehicle
+	level.RideOver = 1
+
+	thread startTruckLightsCheck
+
+	// take care of Klaus driving out
+	if ($starttruckleavepathA && $starttruckbackuppath && $starttruckleavepathB) {
+		wait 3
+
+		local.speed = 400
+		local.reverse_speed = -0.5 * local.speed
+		local.accel = 400
+		local.reached_dest = 200
+		local.look_ahead = 256
+
+		$starttruck drive $starttruckbackuppath local.reverse_speed local.accel local.reached_dest local.look_ahead
+		$starttruck waittill drive
+		wait 0.5
+
+		$starttruck drive $starttruckleavepathA local.speed local.accel local.reached_dest local.look_ahead
+		wait 0.5
+
+		//[202] chrissstrahl - coop compatibility
+		//$gate1 open $player
+		$gate1 open $world
+		
+		$starttruck waittill drive
+		$starttruck drive $starttruckleavepathB local.speed local.accel local.reached_dest local.look_ahead
+		wait 1
+
+		$gate1 close
+		//$starttruck waittill drive
+	}
+}end
+
+//============================================================
+startTruckOptions: {	//self refers to $starttruck
+//============================================================
+	$starttruck nodamage
+
+	if (level.startTruckLights == 1) {
+		exec global/spotlight.scr::corona $starttruck "light left" // Turn on headlight coronas
+		exec global/spotlight.scr::corona $starttruck "light right"
+	}
+}end
+
+//============================================================
+PlayerExitVehicle: {
+//============================================================
+	cueplayer
+	thread coop_stopTruckSpawnManager //[202] Smithy
+	
+	//[202] chrissstrahl - slow down for testing
+	thread coop_mod/developer.scr::timescale 1
+	
+	//[202] chrissstrahl - setup spawnlocations before unglue
+	thread coop_mod/spawnlocations.scr::e1l4_update1		//[202] chrissstrahl - on ship near maproom
+	thread coop_mod/spawnlocations.scr::e1l4_update8		//[202] chrissstrahl - ship hull spawnloc
+	thread coop_mod/spawnlocations.scr::e1l4_update9		//[202] chrissstrahl - mg spawnloc
+
+	//[202] chrissstrahl - handle unglue crap
+	local.player = exec coop_mod/replace.scr::player_closestTo $starttruck
+	if(!local.player){
+		goto PlayerExitVehicle_skipunglueing
+	}
+	
+	local.startpos = local.player.origin
+	local.exitpos = $starttruck gettagposition "passenger_enter"
+	local.exitpos[2] = local.startpos[2]
+
+	//thread global/MaintainCamera.scr::StopMaintainCamera
+	
+	$starttruck notsolid
+	local.playerspot = spawn script_origin origin local.startpos	
+	
+	//[202] chrissstrahl - unglue player, then glue to prevent messing up truck
+	if(level.gametype==0){
+		$player unglue
+		$player solid
+		$player physics_on
+		$player takedamage
+		$player.origin = local.exitpos
+		$player glue local.playerspot 0
+	}else{		
+		exec coop_mod/replace.scr::unglue local.exitpos NIL
+		exec coop_mod/replace.scr::glue local.playerspot 0
+	}
+	
+	local.disembark_time = 0.8
+	local.playerspot time local.disembark_time
+	local.playerspot moveto local.exitpos
+	local.playerspot move
+	wait local.disembark_time
+	
+	//[202] chrissstrahl - unglue again - p1=specific player only, p2=show
+	exec coop_mod/replace.scr::unglue NIL 1
+	exec coop_mod/replace.scr::physics_on
+	exec coop_mod/replace.scr::show
+	
+	//[202] chrissstrahl - unglueing is skipped if no player was theer to get origins
+	PlayerExitVehicle_skipunglueing:
+	local.playerspot remove
+	
+	drawhud 1
+	
+	//[202] Smithy - stops papers being stuck as unholstered
+	waitframe
+	for (local.i = 1; local.i <= $player.size; local.i++){		
+		$player[local.i] forcetorsostate PUTAWAY_MAIN
+	}
+	
+	
+	//chrissstrahl - test, remove me again - used to test if spawnspots work
+	//wait 4 
+	//thread maps/e1l4/SunkShip.scr::ExplodeShip
+	//wait 4
+	//trigger $explodeshiptrigger
+}end
+
+//============================================================
+OpenGate1 local.vehicle: {
+//============================================================
+	//iprintln "OpenGate1 Trigger lives!!!"
+	//$starttruck fullstop
+	end
+	
+	if (local.vehicle == $starttruck) {
+		self remove
+
+		$starttruck modifydrive 0 500 156
+		
+		//[202] chrissstrahl - coop compatibility
+		//$gate1 open $player
+		$gate1 open $world
+		
+		wait 2.5
+
+		$starttruck modifydrive 500 200 156
+	}
+}end
+
+//============================================================
+intro_truck_jitter: {
+//============================================================
+	while (level.RideOver != 1) {
+		if (level.RideOver == 0) {
+			waitexec global/earthquake.scr .3 .1 0 0
+    	}
+	
+	    if (level.RideOver == 0) {
+			waitexec global/earthquake.scr 3 .05 0 0
+	    }
+
+    	if (level.RideOver == 0) {
+			waitexec global/earthquake.scr .5 .15 0 0
+    	}
+
+    	if (level.RideOver == 0) {
+			waitexec global/earthquake.scr 1.5 .05 0 0
+	    }
+
+    	if (level.RideOver == 0) {
+			waitexec global/earthquake.scr .2 .2 0 0
+  		}
+
+    	if (level.RideOver == 0) {
+			waitexec global/earthquake.scr 3 .05 0 0
+    	}
+	}
+}end

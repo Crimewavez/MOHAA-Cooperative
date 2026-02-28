@@ -1,0 +1,213 @@
+//chrissstrahl - modified for coop on 2020.01.13
+
+// Safe Move-To routines
+
+
+SafeRunTo local.dest local.trigger_when_done local.movedonerad local.retry_delay local.crouch_at_dest:
+	//[202] chrissstrahl - prevent spam
+	if(!(isalive self)){ end }
+
+	if (local.trigger_when_done == NIL)
+		local.trigger_when_done = NULL
+	if (local.movedonerad == NIL)
+		local.movedonerad = 100.0
+	if (local.retry_delay == NIL)
+		local.retry_delay = 1.0
+	if (local.crouch_at_dest == NIL)
+		local.crouch_at_dest = 0
+	if (self.safemoveto_in_progress == NIL)
+		self.safemoveto_in_progress = 0
+
+	if (self.safemoveto_in_progress == 1){
+		// one already in progress, so let it finish up
+
+		self.safemoveto_done = 1
+		
+		//[202] chrissstrahl - prevent spam
+		while (isalive self && self.safemoveto_in_progress == 1){
+			waitframe
+		}
+	}
+
+	//[202] chrissstrahl - prevent spam
+	if(!(isalive self)){ end }
+	
+	self.safemoveto_in_progress = 1
+	self.safemoveto_done = 0
+
+	self.destination = local.dest //@smithy //@chrissstrahl - //this is suppose to only activate in coop if ai should go to a player and not anything else
+	self.movedoneradius_backup = self.movedoneradius
+	self.movedoneradius = local.movedonerad
+	self.safemoveto_trigger = local.trigger_when_done
+
+	self.safemoveto_gotmovedoneevent = 0
+	self thread SafeRunTo_WaitMoveThread
+
+	self runto self.destination //@smithy //@chrissstrahl - //this is suppose to only activate in coop if ai should go to a player and not anything else
+	self thread SafeRunTo_MaintenanceThread local.crouch_at_dest local.retry_delay
+end
+
+SafeRunTo_MaintenanceThread local.crouch_at_dest local.retry_delay:
+	while (self && isalive self){
+		//[202] chrissstrahl - I don't get it how is this even possible 
+		//within the same frame the entity just disapears - delete ?
+		while (isalive self && (self.safemoveto_gotmovedoneevent == 0) && (self.safemoveto_done == 0) )
+			waitframe
+
+		//[202] chrissstrahl - Oh, look there is a fly on my screen
+		//oh crap, it did shit on that pixel
+		//that poor pixel
+		//oh wait there is a name starting at that pixel
+		//hmmmm, looks like that name starts with an m
+		//maybe the fly has a point there...
+		//i shall never whipe clean that pixel
+		//shit shall be appointed to where shit belongs
+		//this fly shall be holy and warshiped by all man from now on forwards until the end of Eternity
+		//oh, it just fell off the screen
+		//hmmm, looks like it is dead
+		//that was to much shit for the poor holy fly
+		//it was probably to close to the wlan router without
+		//Tin foil hat for to long
+		//oh my god
+		//it just occured to me,...
+		//i might be next!!!
+		//quickly beam me up mister Skyscraper Luke, or something
+		//there is more IRON in the SKY than I can handle
+		//Oh boy, you really have no
+		//life, do you if you made it all the way down here
+		//reading all this decayed brain soup output
+		//Hello there if you started reading here, you are doing it wrong... ...just a guess.
+		if((isalive self)){
+			if ((self && isalive self) || (self.safemoveto_done == 1) || (vector_within self.origin self.destination.origin self.movedoneradius)){
+				break
+			}
+		}
+
+		wait local.retry_delay
+		//[202] chrissstrahl - just in case check again
+		if (isalive self){
+			self.safemoveto_gotmovedoneevent = 0
+			self runto self.destination //@smithy //@chrissstrahl - //this is suppose to only activate in coop if ai should go to a player and not anything else
+		}
+	}
+
+	if (isalive self){
+		if (self.safemoveto_done == 0){
+			if (local.crouch_at_dest == 1){
+				self exec global/crouch.scr
+				self waittill animdone
+			}
+
+			//[202] chrissstrahl - just in case check again
+			if (isalive self){
+				self.safemoveto_done = 1
+				if (self.safemoveto_trigger != NULL){
+					trigger self.safemoveto_trigger
+				}
+			}
+		}
+
+		//[202] chrissstrahl - just in case check again
+		if (isalive self){
+			self.safemoveto_trigger = NULL
+			self.movedoneradius = self.movedoneradius_backup
+			self.safemoveto_in_progress = 0
+		}
+	}
+end
+
+SafeRunTo_WaitMoveThread:
+	//[200] chrissstrahl - fixed null entity issue
+	while (self.safemoveto_in_progress == 1){
+		self waittill movedone
+
+		//[200] chrissstrahl - make sure we know whats going on
+		if(self == NULL){
+			println("safeMoveTo.scr::SafeRunTo_WaitMoveThread self was NULL - ended")
+			end
+		}
+		self.safemoveto_gotmovedoneevent = 1
+	}
+end
+
+
+SafeRunTo_Wait local.dest local.movedonerad local.retry_delay local.crouch_at_dest:
+	local.trigger = spawn trigger_relay
+	waitthread SafeRunTo local.dest local.trigger local.movedonerad local.retry_delay local.crouch_at_dest
+	local.trigger waittill trigger
+	local.trigger delete
+end
+
+
+// put walkto, crouchto, crawlto variations here if desired
+
+
+
+WaitMoveDone:
+	//[200] chrissstrahl - fixed null entity issue
+	while (self != NULL && self.safemoveto_done == 0){
+		waitframe
+	}
+	//[200] chrissstrahl - make sure we know whats going on
+	if(self == NULL){
+		println("safeMoveTo.scr::WaitMoveDone self was NULL - ended")
+		end
+	}
+end
+
+//-----------------------------------------------------------
+reach local.point:
+//-----------------------------------------------------------
+	if (self.reach_thread)
+		self.reach_thread delete
+
+	self.reach_thread = local
+	
+	//[202] chrissstrahl
+	//this is suppose to only activate if ai should go to a player and not anything else
+	local.targetIsPlayer = 0
+	if(level.gametype != 0){
+		if(waitthread coop_mod/replace.scr::isPlayerObject local.point){
+			local.targetIsPlayer = 1
+		}
+	}
+	
+reach_loop:
+	//@smithy - there are probably more like this here, but I only needed this on to work, if you are bored you can have a look at them
+	//maybe this should all be done completely different and there should be a additional parameter marking that target to reach is a player ?
+	
+	//[200] chrissstrahl - fixed null entity issue
+	if(self == NULL){
+		//[200] chrissstrahl - make sure we know whats going on
+		println("safeMoveTo.scr::reach_loop self was NULL - ended")
+		end
+	}
+	
+	//[202] chrissstrahl - fixed missing player to follow issue
+	//this is suppose to only activate if ai should go to a player and not anything else
+	while(local.targetIsPlayer && !local.point){
+		thread managePlayerToFollow
+		local.point = level.coop_player
+		wait 1
+	}
+	
+	self runto local.point
+	self waittill movedone
+
+	if (parm.movedone==1)
+		end
+
+	wait 0.1
+	goto reach_loop
+
+end
+
+//-----------------------------------------------------------
+reach_cancel:
+//-----------------------------------------------------------
+	if (self.reach_thread)
+	{
+		self.reach_thread delete
+		self.reach_thread = NULL
+	}
+end

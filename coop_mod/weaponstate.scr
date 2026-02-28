@@ -1,0 +1,93 @@
+//[200] Smithy
+//this script is called from global/mike_torso every time a 
+//player holsters/unholsters an item in their hand.
+//you can get a player's active weapon via local.player.flags["coop_activeWeapon"]
+//=========================================================================
+main local.state:{
+//=========================================================================
+if(level.cMTE_coop_weaponstate){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread weaponstate/main->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (!level.coop_stateFileReset || level.coop_stopCoopStateFile){ //we should never have to need this, but just for safety.
+		if (!level.coop_stateFileReset && !waitthread coop_mod/main.scr::inCoopMode){
+			println "(coop_mod/weaponstate.scr::main): ************** MAP " (getcvar "mapname") " IS USING COOP STATEFILE - RESETTING TO global/mike!"
+			setcvar "g_statefile" "global/mike"
+			level.coop_stopCoopStateFile = game.true
+		}
+		level.coop_stateFileReset = game.true
+		end
+	}
+
+	local.player = self
+
+	if (local.state == "RAISE_WEAPON"){							//unholstered
+		wait game.ms 											//so the weapon is classed as activated in engine				
+					
+		//check if the item is a weapon (it could be papers, and if so we don't want to turn disguise off)
+		local.item = waitthread coop_mod/itemhandler.scr::returnActiveWeapon local.player
+		if (local.item && local.item.classname == "Weapon"){
+			local.player.flags["coop_activeWeapon"] = local.item
+			
+			//[202] Smithy - store the previous weapon they used (now stores entity and model)
+			if (local.player.flags["coop_hadWeapon"] && local.player.flags["coop_lastActiveWeapon"]){
+				if (local.player.flags["coop_lastActiveWeaponModel"] != local.player.flags["coop_activeWeapon"].model){
+					local.player.flags["coop_previousWeapon"] = local.player.flags["coop_lastActiveWeapon"]
+					local.player.flags["coop_previousWeaponModel"] = local.player.flags["coop_lastActiveWeaponModel"]
+				}
+			}
+			
+			//println local.player.flags["coop_previousWeaponModel"]
+				
+			//[200] Smithy - allow the game to know their last active weapon on respawn (suggested by Chris)
+			local.player.flags["coop_lastWeapon"] = local.player.flags["coop_activeWeapon"].model 
+			
+			//[202] Smithy - store last active weapon for use in determining previous weapon
+			local.player.flags["coop_lastActiveWeapon"] = local.player.flags["coop_activeWeapon"]
+			local.player.flags["coop_lastActiveWeaponModel"] = local.player.flags["coop_activeWeapon"].model
+			
+			local.player.flags["coop_hadWeapon"] = game.true
+		}else{
+			local.player.flags["coop_activeWeapon"] = NULL
+			local.player.flags["coop_lastWeapon"] = NIL //[200] Smithy - allow the game to know their last active weapon on respawn (suggested by Chris)
+		}		
+		
+		
+		//now see if we can set their isDisguised flag - this is what makes him visible or invisible to ai
+		//if he has no active weapon, he can be disguised. otherwise, pew pew.
+		if (level.coop_enableDisguises){
+			thread coop_mod/itemhandler.scr::setIsDisguised local.player (local.player.flags["coop_activeWeapon"] == NULL)	
+		}
+	}else if (local.state == "PUTAWAY_MAIN"){ 					//holstered		
+		//item was put away, definitely set isDisguised to true
+		local.player.flags["coop_activeWeapon"] = NULL
+		local.player.flags["coop_lastWeapon"] = NIL //[200] Smithy - allow the game to know their last active weapon on respawn (suggested by Chris)
+		if (level.coop_enableDisguises){
+			thread coop_mod/itemhandler.scr::setIsDisguised local.player game.true	
+		}
+	}else if (local.state[0] == "A" && local.state[1] == "T"){ 	//fired
+		//if in disguise state, keep track of weaponfire so we can simulate reactions to noise
+		if (level.coop_enableDisguises && local.player.flags["coop_hasDisguise"] && local.player.has_disguise){
+
+			local.item = local.player.flags["coop_activeWeapon"]
+
+			switch (local.item.model){
+				case "models/weapons/silencedpistol.tik":
+				case "models/weapons/it_w_carcano.tik": 	 	
+					local.silentBullet = game.true; break
+				default:
+					local.silentBullet = game.false
+			}
+			
+			if (!local.silentBullet){
+				//iprintlnbold_noloc("LOUD BULLET")
+				thread coop_mod/itemhandler.scr::broadcastSound local.player "explosion" 1024
+				wait 1
+				if (isAlive local.player){
+					thread coop_mod/aihandler.scr::sentientIsHeard local.player local.player
+				}	
+			}else{
+				//iprintlnbold_noloc("SILENT BULLET")
+			}
+		}
+	}
+}end
+
+

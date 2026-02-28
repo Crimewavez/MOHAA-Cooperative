@@ -1,0 +1,2654 @@
+//chrissstrahl 23.06.2018
+//created to make some mohaa global scripts multiplayer compatible
+//this is largely based on the original HZM Coop Mod script solutions (forked project)
+
+//	ORIGINAL							 	REPLACEMENT
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	level waittill spawn					waitthread coop_mod/replace.scr::waitTillSpawn
+//	level waittill spawn					waitthread coop_mod/replace.scr::waitForPlayer - PLAYER SPAWNING IN TEAM
+//	level waittill prespawn					waitthread coop_mod/replace.scr::waitTillPrespawn
+//	$player.origin							local.vecOriginPlayerMultiplayer = exec coop_mod/replace.scr::player_origin
+//	$ent cansee $player 3500				( exec coop_mod/replace.scr::player_anyCanBeSeen $ent 3500 ) == TRUE
+//	local.player = $player[local.random]	local.player = exec coop_mod/replace.scr::player_random
+
+//=========================================================================
+waitTillSpawn:{
+//=========================================================================
+	if(waitthread coop_mod/main.scr::inCoopMode){
+		if(level.coop_mainScriptLoaded == NIL){
+			waitthread coop_mod/main.scr::main
+		}else{
+			waitframe
+		}
+		
+		if($coop_levelWaitTillSpawn){
+			$coop_levelWaitTillSpawn waittill trigger
+		}
+	}
+	else{
+		level waittill spawn
+	}
+}end
+
+//chrissstrahl - the issue here is that this can't be used in global/ai.scr
+//it will return a error like no free edicts or cl_phrasegamestate bad byte
+//my best guess is it is the function call it self that is causing this
+//=========================================================================
+waitTillPrespawn:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/waitTillPrespawn->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	//keep original handle for singeplayer
+	if(level.gametype == 0){
+		level waittill prespawn
+		end
+	}
+	level waittill prespawn
+	waitframe //[204] chrissstrahl - maybe this helps a bit...
+	end
+
+	//this does not really work out yet
+	//this does not really work out yet
+	//this does not really work out yet
+	//handle in coop
+	if(level.coop_prespawn == NIL){
+		//enter this realm only once
+		level.coop_prespawn = 1
+		//spawn manager trigger
+		spawn trigger_relay targetname "coop_playerHasEnteredManager"
+		//make sure we give the trigger time to spawn
+		waitframe
+		level.coop_prespawn = 2
+		//use original code, if it works it's great for performance
+		level waittill prespawn
+		//wait until a player entered the game
+		while($player == NULL){
+			waitframe
+		}
+		/*//if all goes fast, and trigger can't be found, wait a extra frame
+		if($coop_playerHasEnteredManager == NULL){
+			waitframe
+		}*/
+		//if trigger is not there don't spam console with error
+		if($coop_playerHasEnteredManager != NULL){
+			trigger $coop_playerHasEnteredManager
+		}else{
+			println("COOP: waitTillPrespawn - could not find trigger, no clear-signal send for waiting threads")
+		}
+		//clear prespawn phase var
+		level.coop_prespawn = 3
+	}
+	//all other calls will be handled here, unlike the first call
+	else{
+		if(level.coop_prespawn == NIL || level.coop_prespawn < 2 ){
+			waitframe //wait extra here to keep the active loop count low
+			while(level.coop_prespawn == NIL || level.coop_prespawn < 2 ){
+				waitframe
+			}
+		}
+		//if trigger is no longer there don't spam console with error
+		if($coop_playerHasEnteredManager != NULL){
+			$coop_playerHasEnteredManager waittill trigger
+		}
+	}
+}end
+
+//chrissstrahl - wait until players are on the server and ready
+//notify players for about 6 times, stops then until a new player joins or a player leaves, then repeat all over
+//[200] Smithy - added extra checks to stop coop mod stuff loading in MP
+//=========================================================================
+waitForPlayer:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/waitForPlayer->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	//handle non-coop
+	//[200] Smithy - needed because we call waitForPlayer in global scripts that MP maps use
+	if(!waitthread coop_mod/main.scr::inCoopMode){
+		level waittill spawn //[200] Smithy - only do this in non-coop maps or in SP
+		end
+	}
+
+	//if called again, this will only check for the script variable status
+	//this makes this function more efficent and will reduce the number of events this creates
+	if(level.coop_waitforPlayer != NIL){
+		while( level.coop_waitforPlayer ){
+			waitframe
+		}
+		end
+	}
+
+	//if called for the first time this manages the waiting
+	level.coop_waitforPlayer	= 1
+	local.messageTime			= 1
+	local.messageRepeat			= 0
+	local.messagePlayers		= 0
+	while( level.coop_playerReady != 1){
+		if( $player.size != NULL && $player.size > 0 ){
+			if(local.messageTime < level.time){
+				if( local.messageRepeat < 5 ){
+					println ( "MOHAA Cooperative is waiting for you to spawn." )
+					local.messageTime = ( level.time + 6 )
+					local.messageRepeat++
+					local.messagePlayers = $player.size
+				}else if( $player.size != local.messagePlayers ){
+					 local.messageRepeat = 0
+				}
+			}
+		}
+		wait 0.25
+	}
+	println("coop_mod/replace.scr::waitForPlayer DONE")
+	level.coop_waitforPlayer = 0
+}end
+
+//[202] chrissstrahl
+//purpose to detect if the object is or was meant to be a player
+//=========================================================================
+isPlayerObject local.object:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/isPlayerObject->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	//HIRACY:
+	//1. ENTITY CHECK
+	//2. VECTOR CHECK -> CHAR>1 STRING CHECK -> INT/FLOAT CHECK -> DEFAULT TO STRING
+	//3. DEFAULT TO STRING
+	//4. NO MATCHING TYPE (-1 could not detect type)
+	local.varType = thread coop_mod/main.scr::returnVarType local.ent game.true "isPlayerObject"
+	
+	if(local.varType == 2 && local.object.entnum < level.coop_svmaxclients){ end 1 }
+	if(local.varType == 5 && waitthread isPlayerArray local.object){ end 1 }
+	if(local.varType == 1){
+		if(local.object == "player" || local.object == "$player"){ end 1 }
+	}
+}end 0
+
+//check if the given entity is of type player and a array
+//problems arise as soon as there is more than 1 player on the level
+//[202] chrissstrahl - updated func
+//=========================================================================
+isPlayerArray local.entity:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/isPlayerArray->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	//level.coop_singleplayer reads cvar g_gametype value upon level start once
+	//level.coop_svmaxclients reads cvar sv_maxclients value upon level start once
+
+	//singeplayer or var is empty or entity is missing
+	if( level.gametype == 0 || !local.entity ){ end 0 }
+
+	if( local.entity.size > 1 ){
+		for(local.i = 1;local.i <= local.entity.size;local.i++){
+			local.current =	local.entity[local.i]
+			//- make sure the player has the correct entity number 0 to sv_maxclients(- 1) are reserved for players
+			if(local.current.entnum < level.coop_svmaxclients){
+				end 1
+			}
+		}
+	}
+}end 0
+
+//checks if any player can seen by this actor
+//=========================================================================
+player_anyCanBeSeen local.ent local.fov local.range:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/player_anyCanBeSeen->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if( local.ent == NIL || local.ent == NULL ){
+		end 0
+	}
+	if( local.fov == NIL ){
+		local.fov = 360
+	}
+
+	//this fixes bad scripting/////////////////////
+	if( local.fov > 360 && local.range == NIL ){
+		 local.range = local.fov
+		 local.fov = 360
+	}
+
+	//SINGLEPLAYER////////////////////////////
+	if( level.gametype == 0 ){
+		if( $player != NULL){
+			if( local.ent cansee $player local.range){
+				end 1
+			}
+		}
+	}
+	//MULTIPLAYER////////////////////////////
+	else{
+		local.player = NULL
+		for (local.i = 1;local.i <= $player.size;local.i++){
+			local.player = $player[local.i]
+			if( local.player.dmteam != "spectator" && local.player.health > 0 ){
+				//NORANGE/////////////////
+				if( local.range == NIL ){
+					if( local.ent cansee local.player local.fov ){
+//iprintlnbold_noloc ( "can see" )
+						end 1
+					}
+				}
+				//RANGE/////////////////
+				else{
+					if( local.ent cansee local.player local.fov local.range ){
+//iprintlnbold_noloc ( "can see" )
+						end 1
+					}
+				}
+			}
+		}
+	}
+//iprintlnbold_noloc ( "DEV: can not see" )
+}end 0
+
+//=========================================================================
+player_numActive:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/player_numActive->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.active = 0
+
+	//SINGLEPLAYER////////////////////////////
+	if( level.gametype == 0 ){
+		if( $player != NULL){
+			end 1
+		}
+	}
+	//MULTIPLAYER////////////////////////////
+	else{
+		local.player = NULL
+		for (local.i = 1;local.i <= $player.size;local.i++){
+			local.player = $player[local.i]
+
+			if( local.player.health > 0 && local.player.dmteam != "spectator" ){ //local.player.flags["coop_isActive"] == 1
+				local.active++
+			}
+		}
+	}
+}end local.active
+
+//=========================================================================
+player_random:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/player_random->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+//this function is just a quick fix, this needs to be done right
+	local.player = NULL
+	local.playerReturn = NULL
+
+	local.playerReturn = exec coop_mod/replace.scr::player_anyValid
+}end local.playerReturn
+
+//=========================================================================
+player_anyValid:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/player_anyValid->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.player = NULL
+	local.playerReturn = NULL
+
+	//SINGLEPLAYER////////////////////////////
+	if( level.gametype == 0 ){
+		if( $player != NULL){
+			end $player
+		}
+	}
+	//MULTIPLAYER////////////////////////////
+	else{
+		for (local.i = 1;local.i <= $player.size;local.i++){
+			local.player = $player[local.i]
+
+			if( local.player.dmteam != "spectator" && local.player.health > 0 ){
+				local.playerReturn = local.player
+				end local.playerReturn
+			}
+		}
+	}
+}end local.playerReturn
+
+//=========================================================================
+player_anyPreferValid:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/player_anyPreferValid->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.player = NULL
+	local.playerReturn = NULL
+
+	//SINGLEPLAYER////////////////////////////
+	if( level.gametype == 0 ){
+		if( $player != NULL){
+			end $player
+		}
+	}
+	//MULTIPLAYER////////////////////////////
+	else{
+		local.checking = 2
+		while(local.checking > 0){
+			for (local.i = 1;local.i <= $player.size;local.i++){
+				local.player = $player[local.i]
+				if( local.checking == 2 && local.player.dmteam != "spectator" && local.player.health > 0 || local.player.health > 0){
+					local.playerReturn = local.player
+					end local.playerReturn
+				}
+			}
+			local.checking--
+		}
+	}
+}end local.playerReturn
+
+//returns player closest to...
+//if origin is set that will be used instead of object
+//if object and origin are not set any player will be returned
+//=========================================================================
+player_closestTo local.object local.origin:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/player_closestTo->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	//SINGLEPLAYER////////////////////////////
+	if( level.gametype == 0 ){ end $player }
+
+	//MULTIPLAYER////////////////////////////
+//this accepts eigther of both paramaters (enity, vector)
+//this function is just a quick fix, this needs adjustment
+	local.objectOrigin = ( 0 0 0 )
+	local.player = NULL
+	local.playerReturn = NULL
+	local.currentDistance = 999999
+	local.closestDistance = 999999
+
+	if( local.origin != NIL ){
+		local.objectOrigin = local.origin
+	}
+	else if( local.object == NULL || local.object == NIL){
+		//iprintlnbold_noloc("player_closestTo NIL/NULL")
+		local.playerReturn = exec coop_mod/replace.scr::player_anyValid
+	}
+	else{
+		//iprintlnbold_noloc("player_closestTo " + local.object.targetname )
+		local.objectOrigin = local.object.origin
+	}
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player = $player[local.i]
+		//[203] chrissstrahl - ignoring now players that are in noclip
+		if( local.player.health > 0 && local.player.dmteam != "spectator" && local.player.flags["coop_isActive"] == 1 && local.player.flags["coopDevNoclip"] == NIL){
+			//[202] chrissstrahl - upgraded to calculate distance only once
+			local.currentDistance =  vector_length( local.player.origin - local.objectOrigin )
+			if(local.currentDistance < local.closestDistance ){
+				local.playerReturn		= local.player
+				local.closestDistance	= local.currentDistance
+			}
+		}
+	}
+}end local.playerReturn
+
+//[200] chrissstrahl - returns closest targetable player
+//=========================================================================
+player_closestTargetable local.object:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/player_closestTargetable->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	//SINGLEPLAYER////////////////////////////
+	if( level.gametype == 0 ){ end $player }
+
+	//MULTIPLAYER////////////////////////////
+	if(local.object == NIL ){
+		error ( "coop_mod/replace.scr::player_closestTargetable - parameter 1 was NIL" ) 1000
+	}
+	if(local.object == NULL){
+		error ( "coop_mod/replace.scr::player_closestTargetable - parameter 1 was NULL" ) 1000
+	}
+
+	local.objectOrigin = ( 0 0 0 )
+	local.player = NULL
+	local.playerReturn = NULL
+	local.playerOrigin = (0 0 0)
+	local.closestDistance = 999999
+	local.objectOrigin = local.object.origin
+
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player = $player[local.i]
+		//[203] chrissstrahl - ignoring now players that are in noclip
+		if( local.player.health > 0 && local.player.dmteam != "spectator" && local.player.flags["coop_isActive"] == 1 && local.player.flags["coopDevNoclip"] == NIL){
+			if(local.player canseenoents local.object){
+				if( vector_length( local.player.origin - local.objectOrigin ) < local.closestDistance ){
+					local.playerReturn		= local.player
+					local.closestDistance	= vector_length( local.player.origin - local.objectOrigin )
+				}
+			}
+		}
+	}
+	
+	//[204] chrissstrahl - no valid player found return any closest player - give it to the dedicated func
+	if(local.playerReturn == NULL){
+		local.playerReturn = waitthread player_closestTo local.object
+	}
+}end local.playerReturn
+
+//[204] chrissstrahl - returns closest player in front of a model
+//=========================================================================
+player_closestInFront local.object:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/player_closestInFront->"+level.cMTE+"" )} //[204] chrissstrahl - this is to debug the coop mod thread handling
+	//SINGLEPLAYER////////////////////////////
+	if( level.gametype == 0 ){ end $player }
+
+	//MULTIPLAYER////////////////////////////
+	if(local.object == NIL ){
+		error ( "coop_mod/replace.scr::player_closestInFront - parameter 1 was NIL" ) 1000
+	}
+	if(local.object == NULL){
+		error ( "coop_mod/replace.scr::player_closestInFront - parameter 1 was NULL" ) 1000
+	}
+	if(local.object.angles == NIL){
+		error ( "coop_mod/replace.scr::player_closestInFront - Needs to have angles or be a model" ) 1000
+	}
+	
+	local.objectOrigin = ( 0 0 0 )
+	local.objectAngles = angles_toforward self.angles 
+	
+	local.player = NULL
+	local.playerReturn = NULL
+	local.playerOrigin = (0 0 0)
+	local.closestDistance = 999999
+	local.objectOrigin = local.object.origin
+
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player = $player[local.i]
+		//[203] chrissstrahl - ignoring now players that are in noclip
+		if( local.player.health > 0 && local.player.dmteam != "spectator" && local.player.flags["coop_isActive"] == 1 && local.player.flags["coopDevNoclip"] == NIL){
+			//check if player is actually in front
+			local.vObjDir = vector_subtract local.player.origin self.origin
+			local.vObjDir = vector_normalize local.vObjDir
+			local.dot = vector_dot local.vObjDir local.objectAngles
+		
+			if(local.dot > .707 && vector_length( local.player.origin - local.objectOrigin ) < local.closestDistance ){
+				local.playerReturn		= local.player
+				local.closestDistance	= vector_length( local.player.origin - local.objectOrigin )
+			}
+		}
+	}
+	//no valid player found return any closest player
+	if(local.playerReturn == NULL){
+		local.playerReturn = waitthread player_closestTo local.object
+	}
+}end local.playerReturn
+
+//=========================================================================
+player_origin:{
+//=========================================================================
+	while(1){
+		println("player_origin - outdated func used, crashed game on purpose");
+	}
+}end local.playerOrigin
+
+//=========================================================================
+waittill_spawn:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/waittill_spawn->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	//SINGLEPLAYER////////////////////////////
+	if( level.gametype == 0 ){
+		level waittill spawn
+	}
+	//MULTIPLAYER////////////////////////////
+	else{
+		while( $player == NULL || $player.size == 0 ){
+			waitframe
+			//iprintlnbold_noloc "waiting"
+		}
+	}
+}end
+
+//STOPWATCH
+//replaces $player stopwatch
+//=========================================================================
+stopwatch local.time:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/stopwatch->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if( local.time == NIL ){
+		error ( "coop_mod/replace.scr::stopwatch - parameter 1 was NIL" ) 1000
+		end
+	}
+
+	if( level.gametype == 0 ){
+		$player stopwatch local.time
+		end
+	}
+
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player =  $player[local.i]
+		//make sure 0 can be set always
+		if( local.time == 0 || local.player.dmteam != "spectator" ){
+			local.player stopwatch local.time
+		}
+	}
+}end
+
+//VIEWANGLES
+//replaces $player.viewangles =
+//=========================================================================
+viewangles local.vecAngles:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/viewangles->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player =  $player[local.i]
+		if(level.gametype != 0){
+			if( local.player.health <= 0 || local.player.dmteam == "spectator" ){
+				continue
+			}
+		}
+		local.player.viewangles = local.vecAngles
+	}
+}end
+
+//TMSTOP
+//replaces $player stufftext "tmstop"
+//=========================================================================
+tmstop:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/tmstop->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	//[206] chrissstrahl - made code more compact
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player =  $player[local.i]
+		local.player stufftext "tmstop"
+	}
+	if( level.gametype == 0 ){ end }
+	
+	level.coop_musicCommand = NIL
+}end
+
+//TMSTARTLOOP
+//replaces:
+// 1. $player stufftext "tmstop"
+// 2. $player stufftext "tmstartloop ..."
+//[200] chrissstrahl - previous song is not always stopped
+//=========================================================================
+tmstartloop local.file:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/tmstartloop->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if( local.file == NIL ){
+		error ( "coop_mod/replace.scr::tmstartloop - parameter 1 was NIL" ) 1000
+		end
+	}
+
+	//[200] chrissstrahl - added stop command
+	local.command = "tmstop;tmstartloop "
+	//[200] end
+
+	local.command += local.file
+
+	//[206] chrissstrahl - made code more compact
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player =  $player[local.i]
+		local.player stufftext ( local.command )
+	}
+	if( level.gametype == 0 ){ end }
+	
+	level.coop_musicCommand = local.command
+	//level.coop_musicCommandLoop = local.command
+	//level.coop_musicCommandLoopIndx++
+}end
+
+
+//TMSTART
+//replaces $player stufftext "tmstart ..."
+//=========================================================================
+tmstart local.file local.stop:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/tmstart->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if( local.file == NIL ){
+		error ( "coop_mod/replace.scr::tmstart - parameter 1 was NIL" ) 1000
+		end
+	}
+	
+	//[202] chrissstrahl - added stop command ability
+	if(local.stop){
+		local.command = "tmstop;tmstart "
+	}else{
+		local.command = "tmstart "
+	}
+	local.command += local.file
+
+	//[206] chrissstrahl - made code more compact
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player = $player[local.i]
+		local.player stufftext ( local.command )
+	}
+	if( level.gametype == 0 ){ end }
+	
+	//register, so players entering later will also have that adjusted/send
+	level.coop_musicCommand = local.command
+	//level.coop_musicCommandIndx++
+}end
+
+//replaces $player stufftext "tmvolume ..."
+//=========================================================================
+tmvolume local.vol:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/tmvolume->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if( local.vol == NIL ){
+		error ( "coop_mod/replace.scr::tmvolume - parameter 1 was NIL" ) 1000
+		end
+	}
+
+	local.command = "tmvolume "
+	local.command += local.vol
+
+	//[206] chrissstrahl - made code more compact
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player =  $player[local.i]
+		local.player stufftext ( local.command )
+	}
+	if( level.gametype == 0 ){ end }
+	
+	//register, so players entering later will also have that adjusted/send
+	level.coop_musicCommandVol = local.command
+	//level.coop_musicCommandVolIndx++
+}end
+
+//[202] chrissstrahl
+//TURNTOLOOKAT
+//replaces $wooteva turnto $player
+//=========================================================================
+turntolookat local.instant:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/turntolookat->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if( self == NIL || self == NULL ){
+		error ( "coop_mod/replace.scr::turntolookat - needs to be executed by a actor" ) 1000
+		end
+	}
+
+	//[206] chrissstrahl - made code more compact
+	local.player = exec coop_mod/replace.scr::player_closestTo self
+	if(local.player){
+		self turnto local.player
+		if(!local.instant){
+			self waittill turndone
+		}
+		if(!self){ end }
+		self lookat local.player
+	}
+}end
+
+//TURNTO
+//replaces $wooteva turnto $player
+//=========================================================================
+turnto:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/turnto->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if( self == NIL || self == NULL ){
+		error ( "coop_mod/replace.scr::turnto - needs to be executed by a actor" ) 1000
+		end
+	}
+
+	//[206] chrissstrahl - made code more compact
+	local.player = exec coop_mod/replace.scr::player_closestTo self
+	self turnto local.player
+}end
+
+//LOOKAT
+//replaces $wooteva lookat $player
+//=========================================================================
+lookat:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/lookat->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if( self == NIL || self == NULL ){
+		error ( "coop_mod/replace.scr::lookat - needs to be executed by a actor" ) 1000
+		end
+	}
+	
+	//[206] chrissstrahl - made code more compact
+	local.player = exec coop_mod/replace.scr::player_closestTo self
+	self lookat local.player
+}end
+
+//EYESLOOKAT
+//replaces $wooteva eyeslookat $player
+//=========================================================================
+eyeslookat:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/eyeslookat->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if( self == NIL || self == NULL ){
+		error ( "coop_mod/replace.scr::lookat - needs to be executed by a actor" ) 1000
+		end
+	}
+
+	//[206] chrissstrahl - made code more compact
+	local.player = exec coop_mod/replace.scr::player_closestTo self
+	self eyeslookat local.player
+}end
+
+//ISTOUCHING
+//replaces $player isTouching $whateva
+//=========================================================================
+istouching local.touchMeBaby:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/istouching->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if( local.touchMeBaby == NIL ){
+		error ( "coop_mod/replace.scr::istouching - parameter 1 was NIL" ) 1000
+		end 0
+	}
+	if( local.touchMeBaby == NULL ){
+		error ( "coop_mod/replace.scr::istouching - parameter 1 was NULL" ) 1000
+		end 0
+	}
+
+	if( local.touchMeBaby.size > 1 ){
+		error ( "coop_mod/replace.scr::istouching - parameter 1 was ARRAY" ) 1000
+		end 0
+	}
+
+	if( level.gametype == 0 ){
+		if( $player isTouching local.touchMeBaby ){ end 1 }
+		end 0
+	}
+
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player =  $player[local.i]
+		if( local.player.health > 0 && local.player.dmteam != "spectator" && local.player.flags["coop_isActive"] == 1 ){
+			if( local.player isTouching local.touchMeBaby ){
+				end 1
+			}
+		}
+	}
+}end 0
+
+//ISINSIDE
+//[204] chrissstrahl - replaces $player isinside $whateva
+//=========================================================================
+isinside local.touchMeBaby:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/isinside->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if( local.touchMeBaby == NIL ){
+		error ( "coop_mod/replace.scr::isinside - parameter 1 was NIL" ) 1000
+		end 0
+	}
+	if( local.touchMeBaby == NULL ){
+		error ( "coop_mod/replace.scr::isinside - parameter 1 was NULL" ) 1000
+		end 0
+	}
+
+	if( local.touchMeBaby.size > 1 ){
+		error ( "coop_mod/replace.scr::isinside - parameter 1 was ARRAY" ) 1000
+		end 0
+	}
+
+	if( level.gametype == 0 ){
+		if( $player isinside local.touchMeBaby ){ end 1 }
+		end 0
+	}
+
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player =  $player[local.i]
+		if( local.player.health > 0 && local.player.dmteam != "spectator" && local.player.flags["coop_isActive"] == 1 ){
+			if( local.player isinside local.touchMeBaby ){
+				end 1
+			}
+		}
+	}
+}end 0
+
+//GETTOUCHER
+//returns player touching given entity
+//=========================================================================
+getToucher local.touchMeBaby:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/getToucher->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if( local.touchMeBaby == NIL ){
+		error ( "coop_mod/replace.scr::getToucher - parameter 1 was NIL" ) 1000
+		end NULL
+	}
+	if( local.touchMeBaby == NULL ){
+		error ( "coop_mod/replace.scr::getToucher - parameter 1 was NULL" ) 1000
+		end NULL
+	}
+
+	if( local.touchMeBaby.size > 1 ){
+		error ( "coop_mod/replace.scr::getToucher - parameter 1 was ARRAY" ) 1000
+		end NULL
+	}
+
+	if( level.gametype == 0 ){
+		if( $player isTouching local.touchMeBaby ){ end $player }
+		end NULL
+	}
+
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player =  $player[local.i]
+		if( local.player.health > 0 && local.player.dmteam != "spectator" && local.player.flags["coop_isActive"] == 1 ){
+			if( local.player isTouching local.touchMeBaby ){
+				end local.player
+			}
+		}
+	}
+}end NULL
+
+//AIMAT
+//replaces $wooteva aimat $player
+//=========================================================================
+aimat:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/aimat->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if( self == NIL || self == NULL ){
+		error ( "coop_mod/replace.scr::aimat - needs to be executed by a actor" ) 1000
+		end
+	}
+
+	//[206] chrissstrahl - made code more compact
+	local.player = exec coop_mod/replace.scr::player_closestTo self
+	self aimat local.player
+}end
+
+//SET_HASDISGUISE
+//replaces $player.has_disguise
+//[202] Smithy - we handle disguises in itemhandler now. so only do sp stuff here.
+//=========================================================================
+has_disguise local.disguise:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/has_disguise->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if( local.disguise == NIL ){
+		error ( "coop_mod/replace.scr::has_disguise - parameter 1 was NIL" ) 1000
+		end
+	}
+	
+	//keep for sp
+	if(level.gametype == 0){
+		$player.has_disguise = local.disguise
+	}
+	//mp
+	/*
+	else{
+		for (local.i = 1;local.i <= $player.size;local.i++){
+			local.player =  $player[local.i]
+			local.player.has_disguise = local.disguise
+		}
+	}
+	*/
+}end
+
+
+//PLAYSOUND
+//replaces $player playsound
+//=========================================================================
+playsound local.sound local.dowait:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/playsound->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if( local.sound == NIL ){
+		error ( "coop_mod/replace.scr::playsound - parameter 1 was NIL" ) 1000
+		end
+	}
+
+	if( level.gametype == 0 ){
+		if(local.dowait == NIL){
+			$player playsound local.sound
+		}else{
+			$player playsound local.sound wait
+			$player waittill sounddone
+		}
+		end
+	}
+
+	local.playerWait = NULL
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player =  $player[local.i]
+		if(isAlive local.player && local.player.dmteam != "spectator" && local.player.flags["coop_isActive"] == 1 ){
+			if(local.playerWait == NULL){
+				local.playerWait = local.player
+				if(local.dowait == NIL){
+					local.playerWait playsound local.sound
+				}else{
+					local.playerWait thread playsound_wait local.sound 	//[200] Smithy - fix playsound callbacks on players
+				}
+				//chrissstrahl - fixme debugme finetune
+				//check if we can use $world instead, because it won't disconnect
+			}
+			else{
+				local.player playsound local.sound
+			}
+			local.player forceactivate //[202] Smithy - see if we can execute the sound even if it's outside of the other players' PVS
+		}
+	}
+	if(local.dowait != NIL && local.playerWait != NULL){
+		local.playerWait waittill sounddone
+	}else{
+		wait 1
+	}
+}end
+
+//[200] Smithy - new func
+//this is to replace ONLY playsounds that require a 'wait' and a sounddone
+//you need to keep the sounddone in the level script as is.
+//the hack is done around the playsound command, not the sounddone.
+//which is lucky because waiting for sounddone to finish means
+//gametype will be 0 for too long.
+//Example of this being used is m3l1b.scr::seq_bunker_middle_radio:
+//	$bunker_radio thread coop_mod/replace.scr::playsound_wait "den_scripted_M3L1_11d"
+//	$bunker_radio waittill sounddone
+//[203] Smithy - this is dodgy in dedi servers, so wait a pre-defined 
+//time instead.
+//=========================================================================
+playsound_wait local.sound local.volume:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/playsound_wait->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.threadName = "coop_mod/replace.scr::playsound_wait"
+	if (!self){
+		println "******* WARNING - (" local.threadName "): self was NULL. Fix me!"
+		end
+	}
+	//waitthread coop_mod/main.scr::changeGameType 0 0
+	if (local.volume != NIL){
+		self playsound local.sound NIL (float(local.volume))
+	}else{
+		self playsound local.sound
+	}
+	//waitthread coop_mod/main.scr::changeGameType 2 0
+	
+	local.length = level.coop_soundLength[level.coop_language][local.sound]
+	
+	if (!local.length){
+		println "******* WARNING - (" local.threadName "): sound with alias '" local.sound "' has a length of " local.length ". Add it to coop_mod/sound.scr!!!"
+		
+		//[203] Smithy - TEMP TEMP - TODO: delete me
+		thread playsound_wait_helper_temp parm.previousthread
+		
+		end //<--- hits this before playsound_wait_helper_temp resumes local.previousThread
+	}
+	
+	local.length += level.coop_SOUND_LEN_DONE_OFFSET
+	
+	println "******* INFO - (" local.threadName "): sound with alias '" local.sound "' is starting to wait " local.length " seconds"
+	wait local.length
+	println "******* INFO - (" local.threadName "): sound with alias '" local.sound "' finished waiting"
+	
+}end
+
+//[203] Smithy - TEMP TEMP, only used this to try to force originating thread that called playsound_wait out of suspended state (stop the waittill sounddone)
+//so, if we've used a waitthread on playsound_wait, it hits 'end' in playsound_wait before this thread kicks in, so we know sounddone has been hit
+//this is why it needs to be in a separate thread
+//we won't need this when we've fixed all sounds
+//=========================================================================
+playsound_wait_helper_temp local.previousThread:{
+//=========================================================================
+	wait game.ms //so local.previousThread has hit waittill sounddone
+	if (local.previousThread){
+		local.previousThread wait 0 //don't wait the thread, just jolt it to life (should work according to OPM source)
+	}	
+}end
+
+//[200] Smithy - ok, dialogue also doesn't work without hack if no say anim is found... use separate func
+//give local.idle any value if it is an idlesay command
+//e.g. $talker1 thread coop_mod/replace.scr::say_wait "den_m6l1_614r" "idle"
+//only use this if you need a waittill saydone
+//Note: if saydone works without this then you don't need to use this.
+//it's just when the game can't find an animation for the say, it then 
+//defaults to just a sound, which uses the callback code which fails.
+//[203] Smithy - this is dodgy in dedi servers, so wait a pre-defined 
+//time instead.
+//=========================================================================
+say_wait local.dialogue local.idle:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/say_wait->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.threadName = "coop_mod/replace.scr::say_wait"
+	if (!self){
+		println "******* WARNING - (" local.threadName "): self was NULL. Fix me!"
+		end
+	}
+	
+	// changeGameType won't run if level.gametype is 0
+	//waitthread coop_mod/main.scr::changeGameType 0 0
+	if (!local.idle){
+		self say local.dialogue
+	}else{
+		self idlesay local.dialogue	
+	}
+	//waitthread coop_mod/main.scr::changeGameType 2 0
+	
+	local.length = level.coop_soundLength[level.coop_language][local.dialogue]
+	
+	if (!local.length){
+		println "******* WARNING - (" local.threadName "): sound with alias '" local.dialogue "' has a length of " local.length ". Add it to coop_mod/sound.scr!!!"
+		
+		//[203] Smithy - TEMP TEMP - TODO: delete me
+		thread playsound_wait_helper_temp parm.previousthread
+		
+		end //<--- hits this before playsound_wait_helper_temp resumes local.previousThread
+	}
+	
+	local.length += level.coop_SOUND_LEN_DONE_OFFSET
+	
+	println "******* INFO - (" local.threadName "): sound with alias '" local.dialogue "' is starting to wait " local.length " seconds"
+	wait local.length
+	println "******* INFO - (" local.threadName "): sound with alias '" local.dialogue "' finished waiting"
+}end
+
+//replaces $player ammo ...
+//=========================================================================
+ammo local.type local.amount local.sound:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/ammo->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+//gives ammo to all players
+	if( level.gametype == 0 ){
+		$player ammo local.type local.amount
+		if(local.sound != NIL){
+			$player playsound local.sound
+		}
+		end
+	}
+
+	if ($player){ //[200] Smithy - this is a better check
+		for (local.i = 1;local.i <= $player.size;local.i++){
+			local.player = $player[local.i]
+			//[200] Smithy - no need for these checks, as engine already has them or they are superflous.
+			//if( local.player.health > 0 && local.player.dmteam != "spectator" && local.player.flags["coop_isActive"] == 1 ){
+			local.player ammo local.type local.amount
+			if(local.sound != NIL){
+				local.player playsound local.sound
+			}
+			//}
+		}
+	}
+
+
+	//[200] Smithy - now add it to loadout so everyone spawns with this amount from now on
+	thread coop_mod/itemhandler.scr::addAmmoToLoadout local.type local.amount
+}end
+
+//chrissstrahl - updated function, the function was actually corrupted in logic
+//chrissstrahl - function was not using the supplied offest vectors
+//25.10.2018
+//=========================================================================
+sighttrace local.offset local.vec local.pass local.min local.max:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/sighttrace->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if(local.offset == NIL){
+		local.offset = (0 0 0)
+	}
+
+	if( level.gametype == 0 ){
+		if(local.pass != NIL && local.min != NIL && local.max != NIL ){
+			end ( sighttrace ($player.origin + local.offset) local.vec local.pass local.min local.max )
+		}
+		else if(local.pass != NIL && local.min != NIL ){
+			end ( sighttrace ($player.origin + local.offset) local.vec local.pass local.min )
+		}
+		else if(local.pass != NIL ){
+			end ( sighttrace ($player.origin + local.offset) local.vec local.pass )
+		}
+		else{
+			end (sighttrace ($player.origin + local.offset) local.vec)
+		}
+	}
+
+	local.notBlocked = 0
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player = $player[local.i]
+		if( local.player.health > 0 && local.player.dmteam != "spectator" && local.player.flags["coop_isActive"] == 1 ){
+			if(local.pass != NIL && local.min != NIL && local.max != NIL ){
+				if( sighttrace (local.player.origin + local.offset) local.vec local.pass local.min local.max ){
+					local.notBlocked = 1
+				}
+			}
+			else if(local.pass != NIL && local.min != NIL ){
+				if( sighttrace (local.player.origin + local.offset) local.vec local.pass local.min ){
+					local.notBlocked = 1
+				}
+			}
+			else if(local.pass != NIL ){
+				if( sighttrace (local.player.origin + local.offset) local.vec local.pass ){
+					local.notBlocked = 1
+				}
+			}
+			else{
+				if(sighttrace (local.player.origin + local.offset) local.vec){
+					local.notBlocked = 1
+				}
+			}
+		}
+	}
+}end local.notBlocked
+
+//=========================================================================
+item local.item local.use:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/item->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+//adds item to the item list
+//gives item to players
+
+	if( level.gametype == 0 ){
+		$player item local.item
+		if(local.use != NIL && local.use == 1){
+			$player use local.item
+		}
+		end
+	}
+
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player = $player[local.i]
+		if( local.player.health > 0 && local.player.dmteam != "spectator" && local.player.flags["coop_isActive"] == 1 ){
+			local.player item local.item
+			if(local.use != NIL && local.use == 1){
+				local.player use local.item
+			}
+		}
+	}
+
+	if(level.coop_playerItem1 == NIL ){
+		level.coop_playerItem1 = local.item
+		end
+	}
+	if(level.coop_playerItem2 == NIL ){
+		level.coop_playerItem2 = local.item
+		end
+	}
+	if(level.coop_playerItem3 == NIL ){
+		level.coop_playerItem3 = local.item
+		end
+	}
+	if(level.coop_playerItem4 == NIL ){
+		level.coop_playerItem4 = local.item
+		end
+	}
+}end
+
+//=========================================================================
+take local.item:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/take->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+//removes item from the item list
+//takes item from players
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player = $player[local.i]
+		local.player take local.item
+	}
+
+	if( level.gametype == 0 ){ end }
+
+	if(level.coop_playerItem1 == local.item ){ level.coop_playerItem1 = NIL }
+	if(level.coop_playerItem2 == local.item ){ level.coop_playerItem2 = NIL }
+	if(level.coop_playerItem3 == local.item ){ level.coop_playerItem3 = NIL }
+	if(level.coop_playerItem4 == local.item ){ level.coop_playerItem4 = NIL }
+}end
+
+//[204] Chrissstrahl - added alias
+//=========================================================================
+takeall local.noWeapon:{
+//=========================================================================
+	waitthread takeAll local.noWeapon
+}end
+
+//[202][hotfix] Smithy - added noWeapon param
+//=========================================================================
+takeAll local.noWeapon:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/takeAll->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+//takes all weapons and items from the players
+	if (local.noWeapon){
+		level.coop_noWeapon = game.true
+	}
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player = $player[local.i]
+		local.player takeall
+	}
+
+	if( level.gametype == 0 ){ end }
+
+	level.coop_playerItem1 = NIL
+	level.coop_playerItem2 = NIL
+	level.coop_playerItem3 = NIL
+	level.coop_playerItem4 = NIL
+}end
+
+//checks if any player can see this actor
+//=========================================================================
+cansee local.fov local.range:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/cansee->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if( self == NIL || self == NULL ){
+		error ( "coop_mod/replace.scr::cansee - needs to be executed by a entity" ) 1000
+		end 0
+	}
+
+	//SINGLEPLAYER////////////////////////////
+	if( level.gametype == 0 ){
+		if( $player != NULL){
+			if( local.range == NIL && local.fov == NIL){
+				if( $player cansee self ){ end 1 }
+			}else if( local.range == NIL && local.fov != NIL){
+				if( $player cansee self local.fov ){ end 1 }
+			}else{
+				if( $player cansee self local.fov local.range ){ end 1 }
+			}
+		}
+		end 0
+	}
+
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player = $player[local.i]
+		//[203] chrissstrahl - ignoring now players that are in noclip
+		if( local.player.health > 0 && local.player.dmteam != "spectator" && local.player.flags["coop_isActive"] == 1 && local.player.flags["coopDevNoclip"] == NIL){
+
+			if( local.range == NIL && local.fov == NIL){
+				if( local.player cansee self ){ end 1 }
+			}else if( local.range == NIL && local.fov != NIL){
+				if( local.player cansee self local.fov ){ end 1 }
+			}else{
+				if( local.player cansee self local.fov local.range ){ end 1 }
+			}
+		}
+	}
+}end 0
+
+//=========================================================================
+canseenoents local.fov local.range:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/canseenoents->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+//check if actor can se a player
+	if( self == NIL || self == NULL ){
+		error ( "coop_mod/replace.scr::canseenoents - needs to be executed by a entity" ) 1000
+		end 0
+	}
+
+	//SINGLEPLAYER////////////////////////////
+	if( level.gametype == 0 ){
+		if( $player != NULL){
+			if( local.range == NIL && local.fov == NIL){
+				if( $player canseenoents self ){ end 1 }
+			}else if( local.range == NIL && local.fov != NIL){
+				if( $player canseenoents self local.fov ){ end 1 }
+			}else{
+				if( $player canseenoents self local.fov local.range ){ end 1 }
+			}
+		}
+		end 0
+	}
+
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player = $player[local.i]
+		//[203] chrissstrahl - ignoring now players that are in noclip
+		if( local.player.health > 0 && local.player.dmteam != "spectator" && local.player.flags["coop_isActive"] == 1 && local.player.flags["coopDevNoclip"] == NIL){
+
+			if( local.range == NIL && local.fov == NIL){
+				if( local.player canseenoents self ){ end 1 }
+			}else if( local.range == NIL && local.fov != NIL){
+				if( local.player canseenoents self local.fov ){ end 1 }
+			}else{
+				if( local.player canseenoents self local.fov local.range ){ end 1 }
+			}
+		}
+	}
+}end 0
+
+//=========================================================================
+playerCansee local.ent local.fov local.range:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/playerCansee->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+//check if player can see the entity
+	if( local.ent == NIL ){
+		error ( "coop_mod/replace.scr::playerCansee - parameter1 was NIL" ) 1000
+		end 0
+	}
+	if( local.ent == NULL ){
+		error ( "coop_mod/replace.scr::playerCansee - parameter1 was NULL" ) 1000
+		end 0
+	}
+
+	//SINGLEPLAYER////////////////////////////
+	if( level.gametype == 0 ){
+		if( $player != NULL){
+			if( local.range == NIL && local.fov == NIL){
+				if( $player cansee local.ent ){ end 1 }
+			}else if( local.range == NIL && local.fov != NIL){
+				if( $player cansee local.ent local.fov ){ end 1 }
+			}else{
+				if( $player cansee local.ent local.fov local.range ){ end 1 }
+			}
+		}
+		end 0
+	}
+
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player = $player[local.i]
+		//[203] chrissstrahl - ignoring now players that are in noclip
+		if( local.player.health > 0 && local.player.dmteam != "spectator" && local.player.flags["coop_isActive"] == 1 && local.player.flags["coopDevNoclip"] == NIL){
+			if( local.range == NIL && local.fov == NIL){
+				if( local.player cansee local.ent ){ end 1 }
+			}else if( local.range == NIL && local.fov != NIL){
+				if( local.player cansee local.ent local.fov ){ end 1 }
+			}else{
+				if( local.player cansee local.ent local.fov local.range ){ end 1 }
+			}
+		}
+	}
+}end 0
+
+//=========================================================================
+canseeGetClosest local.fov local.range:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/canseeGetClosest->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+//check if actor can se a player
+	if( self == NIL ){
+		error ( "coop_mod/replace.scr::canseeGetClosest - NEEDS to be executed by a enity" ) 1000
+		end NULL
+	}
+	if( self == NULL ){
+		error ( "coop_mod/replace.scr::canseeGetClosest - Executing entity is NULL" ) 1000
+		end NULL
+	}
+
+	//SINGLEPLAYER////////////////////////////
+	if( level.gametype == 0 ){
+		if( $player != NULL){
+			if( local.range == NIL && local.fov == NIL){
+				if( self cansee $player ){ end $player }
+			}else if( local.range == NIL && local.fov != NIL){
+				if( self cansee $player local.fov ){ end $player }
+			}else{
+				if( self cansee $player local.fov local.range ){ end $player }
+			}
+		}
+		end NULL
+	}
+
+//this function is just a quick fix, this needs adjustment
+	//MULTIPLAYER////////////////////////////
+	local.origin = ( 0 0 0 )
+	local.player = NULL
+	local.playerReturn = NULL
+	local.playerOrigin = (0 0 0)
+	local.closestDistance = 999999
+
+	if( self == NULL || self == NIL){
+		end NULL
+	}else{
+		local.origin = self.origin
+	}
+
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player = $player[local.i]
+		//[203] chrissstrahl - ignoring now players that are in noclip
+		if( local.player.health > 0 && local.player.dmteam != "spectator" && local.player.flags["coop_isActive"] == 1 && local.player.flags["coopDevNoclip"] == NIL){
+			local.playerIsValid = 0
+			if( local.range == NIL && local.fov == NIL){
+				if( self cansee local.player ){ local.playerIsValid = 1}
+			}else if( local.range == NIL && local.fov != NIL){
+				if( self cansee local.player local.fov ){ local.playerIsValid = 1 }
+			}else{
+				if( self cansee local.player local.fov local.range ){ local.playerIsValid = 1 }
+			}
+			if(local.playerIsValid){
+				
+				if( vector_length( local.player.origin - local.origin ) < local.closestDistance ){
+					local.playerReturn		= local.player
+					local.closestDistance	= vector_length( local.player.origin - local.origin )
+				}
+			}
+		}
+	}
+}end local.playerReturn
+
+//KILLZONE
+//replaces $player normal_damage
+//killes players touching a specific trigger(zone)
+//=========================================================================
+killzone:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/killzone->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if( self == NULL ){
+		error ( "coop_mod/replace.scr::killzone - Needs to be executed by a trigger entity" ) 1000
+		end
+	}
+
+	if( level.gametype == 0 ){
+		$player normal_damage (local.player.health + 1)
+		end
+	}
+
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player =  $player[local.i]
+		if( local.player isTouching self ){
+			if( local.player.dmteam != "spectator" && local.player.health > 0  /* && local.player.flags["coop_isActive"] == 1*/ ){
+				//terminate player
+				local.player normal_damage (local.player.health + 1)
+				//make sure player will not respawn inside killzone
+				exec coop_mod/main.scr::resetSpawn local.player
+			}
+		}
+	}
+}end
+
+
+//=========================================================================
+threatbias local.val:{ //kinda like ai_off or rather notarget for this player
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/threatbias->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+//used to set player threat bias, managed inside coop mod
+	level.coop_threatbias = local.val
+
+	if( level.gametype == 0 ){
+		$player threatbias level.coop_threatbias
+		end
+	}
+
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player =  $player[local.i]
+		//[203] chrissstrahl - ignoring now players that are in noclip
+		if( local.player.health > 0 && local.player.dmteam != "spectator" && local.player.flags["coop_isActive"] == 1 && local.player.flags["coopDevNoclip"] == NIL){
+			local.player threatbias level.coop_threatbias
+		}
+	}
+}end
+
+
+//KILLPLAYER
+//[201] Chrissstrahl - added takedamage
+//=========================================================================
+killplayer:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/killplayer->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if( level.gametype == 0 ){
+		$player takedamage
+		$player damage $world 15000 $world (0 0 0) (0 0 0) (0 0 0) 0 9 0 0
+		end
+	}
+
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player =  $player[local.i]
+		if( local.player.dmteam != "spectator" && local.player.health > 0 ){
+			local.player takedamage
+			local.player damage $world 15000 $world (0 0 0) (0 0 0) (0 0 0) 0 9 0 0
+		}
+	}
+}end
+
+
+//GLUE
+//=========================================================================
+glue local.entity local.angle local.hide:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/glue->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (level.gametype == 0){
+		if(local.angle == NIL){
+			$player glue local.entity
+		}else{
+			$player glue local.entity local.angle
+		}
+		end
+	}
+	
+	if (local.hide == NIL){ local.hide = game.true }
+	
+	//handle multiplayer
+	thread glueHandle local.entity local.angle local.hide
+}end
+
+//optimize glue so that it glues player only one
+//make sure we handle glueing of each player in a generalized
+//seperate thread fot this and new glue function
+//maybe glueing only once will stop shaking when glued while object is moving
+//
+//[200] chrissstrahl - rewritten
+//[200] Smithy - re-written again - no loop needed now. no entity flags. etc...
+//and uses entnums instead of array index
+//=========================================================================
+glueHandle local.glueTo local.angle local.hide:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/glueHandle->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	level.coop_playerGlue = 1
+
+	level.coop_glueTo = local.glueTo  	//[200] Smithy - save these for new spawns
+	level.coop_glueAngle = local.angle 
+
+	//detect if it is a entity or a string, if it is a string we want each player to have a seperate spot
+	if(local.glueTo.size > 1){
+		level.coop_playerGlueIndividual = 1
+	}else{
+		level.coop_playerGlueIndividual = 0
+	}
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player =  $player[local.i]
+		if (isAlive local.player && local.player.dmteam != "spectator"){
+			thread coop_mod/main.scr::playerGlue local.player NIL local.hide
+		}	
+	}
+}end
+
+//UNGLUE
+//in some cases we don't want to show the player after unglue, on default he remains hidden
+//=========================================================================
+unglue local.ent local.show:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/unglue->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	level.coop_playerGlue = 0
+	level.coop_playerGlueIndividual = 0
+	level.coop_glueTo = NIL  			//[200] Smithy - reset
+	level.coop_glueAngle = NIL 
+	
+	//[202] chrissstrahl - added support for exitpoint and show
+	if(local.ent){
+		local.varType = thread coop_mod/main.scr::returnVarType local.ent NIL "replace::unglue 1"
+		//entity
+		if(local.varType == 2){ local.exitPoint = local.ent.origin } //grab origin
+		//vector
+		else if(local.varType == 3){ local.exitPoint =  local.ent} //use origin
+		//bad type
+		else{
+			local.varTypeName = thread coop_mod/main.scr::returnVarTypename local.varType
+			error ("coop_mod/replace.scr::unglue - does not support var type: "+local.varTypeName) 1000
+		}
+	}
+	
+	if( level.gametype == 0 ){
+		$player unglue
+		$player show //not sure if that is right
+		
+		//[202] chrissstrahl - set origin if given, show if set
+		if(local.exitPoint){ $player origin (local.exitPoint) }
+//if(local.show){ $player show } //[204] chrissstrahl - code review - conflict here, but I suspect in sp we aalways wana show player
+		end
+	}
+	if ($player){ //[200] Smithy - NULL check should be outside loop
+		for (local.i = 1;local.i <= $player.size;local.i++){
+			local.player =  $player[local.i]
+			local.player solid
+			local.player unglue
+			local.player physics_on
+			
+			//[202] chrissstrahl - set origin if given, show if set
+			if(local.exitPoint){ local.player origin (local.exitPoint) }
+			if(local.show){ local.player show }
+			
+			//added in ver 2.00 making sure unglued players don't get stuck in each other if they are at the same pos
+			thread coop_mod/main.scr::playerMakeSolidAsap local.i
+		}	
+	}
+}end
+
+//PHYSICS_ON
+//=========================================================================
+physics_on:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/physics_on->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	level.coop_physicsOff = 0
+	if( level.gametype == 0 ){
+		$player physics_on
+		$player.flags["coop_physicsOff"] = 0
+		end
+	}
+
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player =  $player[local.i]
+		local.player physics_on
+		local.player.flags["coop_physicsOff"] = 0
+	}
+}end
+
+//PHYSICS_OFF
+//=========================================================================
+physics_off:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/physics_off->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	level.coop_physicsOff = 1
+	if( level.gametype == 0 ){
+		$player physics_off
+		$player.flags["coop_physicsOff"] = 1
+		end
+	}
+
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player =  $player[local.i]
+		local.player physics_off
+		local.player.flags["coop_physicsOff"] = 1
+	}
+}end
+
+//SHOW
+//=========================================================================
+show:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/show->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if( level.gametype == 0 ){
+		$player show
+		end
+	}
+	level.coop_playerHide = 0
+
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player =  $player[local.i]
+		if( local.player.health > 0 && local.player.dmteam != "spectator" && local.player.flags["coop_isActive"] == 1 ){
+			local.player show
+		}
+	}
+}end
+
+//HIDE
+//=========================================================================
+hide:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/hide->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if( level.gametype == 0 ){
+		$player hide
+		end
+	}
+	level.coop_playerHide = 1
+
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player =  $player[local.i]
+		if( local.player.dmteam != "spectator" && local.player.health > 0 ){
+			local.player hide
+		}
+	}
+}end
+
+//FORCELEGSTATE
+//=========================================================================
+forcelegsstate local.state:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/forcelegsstate->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if( level.gametype == 0 ){
+		$player forcelegsstate local.state
+		end
+	}
+
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player =  $player[local.i]
+		if( local.player.dmteam != "spectator" && local.player.health > 0 ){
+			local.player forcelegsstate local.state
+		}
+	}
+}end
+
+//[200] chrissstrahl - can now handle vector or entity in parameter 1
+//WITHINDISTANCEOF
+//returns 1 if any player is within given distance of given entity
+//=========================================================================
+withinDistanceOf local.ent local.distance:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/withinDistanceOf->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if( level.gametype == 0 ){
+		if( vector_length($player.origin - local.ent.origin) <= local.distance ){
+			end 1
+		}
+		end 0
+	}
+
+	if( local.ent == NULL ){
+		error ( "coop_mod/replace.scr::withinDistanceOf - parameter1 was NULL" ) 1000
+		end 0
+	}
+	if( local.ent == NIL){
+		error ( "coop_mod/replace.scr::withinDistanceOf - parameter1 was NIL" ) 1000
+		end 0
+	}
+	if( local.distance == NIL){
+		error ( "coop_mod/replace.scr::withinDistanceOf - parameter2 was NIL" ) 1000
+		end 0
+	}
+
+	//[200] chrissstrahl - added to detect vector or entity
+	local.vOrigin = (0 0 0)
+	local.varType = thread coop_mod/main.scr::returnVarType local.ent NIL "replace::withinDistanceOf"
+
+	//[200] chrissstrahl - fixed type detection
+	if(local.varType == 3){
+		local.vOrigin = local.ent
+	}else if(local.varType == 2){
+		//[200] chrissstrahl - added to detect arrays
+		if( int(local.ent.size) > 1 ){
+			error ( "coop_mod/replace.scr::withinDistanceOf - parameter1 was ENTITY-ARRAY" ) 1000
+			end 0
+		}
+		local.vOrigin = local.ent.origin
+	}
+	//[200] chrissstrahl - added error info if bad type
+	else{
+		local.vartypeName = waitthread coop_mod/main.scr::returnVarTypename local.varType
+		error ( "coop_mod/replace.scr::withinDistanceOf - parameter1 was ("+local.vartypeName+") needs to be VECTOR or ENTITY" ) 1000
+		end 0
+	}
+
+	//[200] chrissstrahl - simplified code
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player =  $player[local.i]
+		//[203] chrissstrahl - ignoring now players that are in noclip
+		if( local.player.health > 0 && local.player.dmteam != "spectator" && local.player.flags["coop_isActive"] == 1 && local.player.flags["coopDevNoclip"] == NIL){
+			if( vector_length((local.player.origin) - (local.vOrigin)) <= local.distance ){
+				end 1
+			}
+		}
+	}
+}end 0
+
+
+//WITHINDISTANCE
+//=========================================================================
+withinDistance local.vOrigin local.distance:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/withinDistance->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+//returns 1 if any player is within given distance of given origin
+	if( level.gametype == 0 ){
+		if( vector_length($player.origin - local.vOrigin) <= local.distance ){
+			end 1
+		}
+		end 0
+	}
+
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player =  $player[local.i]
+		//[203] chrissstrahl - ignoring now players that are in noclip
+		if( local.player.health > 0 && local.player.dmteam != "spectator" && local.player.flags["coop_isActive"] == 1 && local.player.flags["coopDevNoclip"] == NIL){
+			if( vector_length(local.player.origin - local.vOrigin) <= local.distance ){
+				end 1
+			}
+		}
+	}
+}end 0
+
+//LOOPSOUND
+//=========================================================================
+loopsound local.sound:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/loopsound->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+//returns 1 if any player is within given distance of given entity
+	if( level.gametype == 0 ){
+		$player loopsound local.sound
+		end
+	}
+
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player =  $player[local.i]
+		if( local.player.dmteam != "spectator" ){
+			local.player loopsound local.sound
+		}
+	}
+}end
+
+//STOPLOOPSOUND
+//=========================================================================
+stoploopsound local.sound:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/stoploopsound->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+//returns 1 if any player is within given distance of given entity
+	//[206] chrissstrahl - made code more compact
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player =  $player[local.i]
+		local.player stoploopsound local.sound
+	}
+}end
+
+//RUNTOCLOSESET
+//=========================================================================
+runto:{
+runtoClosest: //[200] chrissstrahl - Smithy way of reducing redundancy - assimilated
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/runtoClosest+runto->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+//runs to closest player - used for enemies to charge towards any player
+	if( self == NIL || self == NULL ){
+		error ( "coop_mod/replace.scr::runto - Needs to be executed by a actor" ) 1000
+		end
+	}
+
+	local.player = exec coop_mod/replace.scr::player_closestTo self
+	self runto local.player
+}end
+
+//ORIGIN
+//=========================================================================
+origin local.ent:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/origin->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+//get origin of closest player
+	local.vec = NIL
+	if( local.ent == NIL || local.ent == NULL ){
+		error ( "coop_mod/replace.scr::origin - Parameter 1 needs to be a entity" ) 1000
+		end
+	}
+	local.player = exec coop_mod/replace.scr::player_closestTo self
+	//if no player return 0 0 0
+	if(local.player == NULL){
+		end ( 0 0 0 )
+	}
+	local.vec = local.player.origin
+}end local.vec
+
+//[200] Smithy - added a simple bool check to stop abuse
+//				 e.g cardgame has many unholster commands in it
+//				 they were twitching as many weapons were given to them
+//=========================================================================
+holster:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/holster->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+//chrissstrahl - this fixes problems we have in coop with ai (cardgame and so forth)
+	self.flags["coop_holsterGun"] = self.gun
+	self.flags["coop_isHolstered"] = game.true 	//[200] Smithy - add this flag to stop abuse
+	self holster
+}end
+
+//[200] Smithy - check against the new flag
+//=========================================================================
+unholster:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/unholster->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if(!(isAlive self)){ end } //[203] chrissstrahl - added check to prevent console spam
+	//[200] Smithy - removed trailing 'q' and made it report better
+	if(!self.flags["coop_holsterGun"]){
+		//[205] chrissstrahl - make sure we don't get a error on printout
+		local.printOut = self.flags["coop_holsterGun"]
+		if(local.printOut == NIL){ local.printOut = "NIL"}
+		
+		println("DEV: - replace.scr::unholster flags[coop_holsterGun] was " + local.printOut)
+	}
+	if (self.flags["coop_isHolstered"]){ 		//[200] Smithy - check this flag to stop abuse
+		self gun self.flags["coop_holsterGun"]
+		self.flags["coop_isHolstered"] = game.false
+	}
+}end
+
+//=========================================================================
+spawnclip local.origin local.mins local.maxs local.targetname local.scale local.angle local.message local.requiredentity local.range:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/spawnclip->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+//chrissstrahl - spawns a clip preventing players from getting any further
+//idealy dsplaying a message why or what to do
+	if(local.targetname == NIL){ local.targetname = "coop_spawnedClip" }
+	if(local.scale == NIL){ local.scale = 0.5 }
+	if(local.angle == NIL){ local.angle = 0 }
+
+	//local.entity = spawn script_model model models/fx/dummy.tik targetname local.targetname origin local.origin
+	//local.entity = spawn script_model model models/emitters/ddaysmoke2.tik targetname local.targetname origin local.origin
+	//local.entity = spawn script_model model models/miscobj/barbwire_long_pulse.tik targetname local.targetname origin local.origin
+	local.entity = spawn script_model model models/static/barbwire.tik targetname local.targetname origin local.origin
+	waitframe
+	if( local.entity == NULL ){ end }
+
+	local.entity setsize local.mins local.maxs
+	local.entity scale local.scale
+	local.entity angle local.angle
+	local.entity solid
+
+	if( local.message == NIL && local.requiredentity == NIL){
+		end
+	}
+
+	local.entityrequired = 1
+	if(local.requiredentity == NIL || local.requiredentity == NULL){
+		if(local.requiredentity == NULL){
+			iprintlnbold_noloc("Coop: WARNING: spawnclip - NULL entity given")
+		}
+		local.entityrequired = 0
+	}
+
+	while(local.entity){
+		//wait for required entity
+		if(local.entityrequired){
+			if(local.requiredentity == NULL || vector_length(local.requiredentity.origin - local.entity.origin) <= local.range){
+				local.entity remove
+				end
+			}
+		}
+		//show info message
+		if(local.message != NIL){
+			if(exec coop_mod/replace.scr::istouching local.entity){
+				iprintlnbold_noloc(local.message)
+				wait 5
+			}
+		}
+		waitframe
+	}
+}end
+
+//waits until vehicle stops, optional self specifified delay time
+//=========================================================================
+waittilldrive local.delay local.wait:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/waittilldrive->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if( local.delay != NIL){
+		wait local.delay
+	}
+	while(self != NULL){
+		local.origin = self.origin
+
+		if( local.wait != NIL){
+			wait local.wait
+		}
+		else{
+			waitframe
+		}
+
+		if(self == NULL || self.origin == local.origin){
+			end
+		}
+	}
+}end
+
+
+//waits until self is in range of other
+//=========================================================================
+waittillRange local.other local.range:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/waittillRange->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	while(self != NULL && local.other != NULL){
+		if(vector_length(self.origin - local.other.origin) <= local.range){
+			end
+		}
+		waitframe
+	}
+}end
+
+//waits until self is in range of vector
+//=========================================================================
+waittillRangeVector local.vector local.range:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/waittillRangeVector->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	while(self != NULL){
+		if(vector_length(self.origin - local.vector) <= local.range){
+			end
+		}
+		waitframe
+	}
+}end
+
+//used to move objects relative to their current origin
+//=========================================================================
+originOffset local.offset:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/originOffset->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.origin = self.origin
+	self origin (local.origin + local.offset)
+}end
+
+//SOLID
+//makes a entity solid and moves all players away, which would get stuck
+//if no away or landing position is set, players will be moved back to spawn position
+//[200] chrissstrahl - allow parmeter1 to be of type vector or entity
+//=========================================================================
+solid local.awaypos:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/solid->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if(self == NULL){ end }
+	self solid
+
+	local.vartype = waitthread coop_mod/main.scr::returnVarType local.awaypos NIL "replace::solid"
+
+	//[200] chrissstrahl - make sure the right var type is used
+	if(local.vartype != 2 && local.vartype != 3){
+		local.varTypeName = waitthread coop_mod/main.scr::returnVarTypename local.vartype
+		error ( "coop_mod/replace.scr::solid - parameter1 was of type "+local.varTypeName+", but needs to be: Enity or Vector" ) 1000
+		end
+	}
+
+	//[200] chrissstrahl - get pos
+	local.location = NIL
+	if(local.vartype == 2 ){ //entity
+		if( local.awaypos != NULL ){
+			local.location = local.awaypos.origin
+		}
+	}else{ //vector
+		local.location = local.awaypos
+	}
+
+	//[200] chrissstrahl - make sp compatible
+	if(level.gametype == 0){
+		if(local.location != NIL){
+			$player origin local.location
+		}
+		thread coop_mod/main.scr::playerMakeSolidAsap local.i
+		end
+	}
+
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player =  $player[local.i]
+		if( local.player isTouching self){
+			if( local.player.dmteam != "spectator" && local.player.health > 0 ){
+				if(local.location != NIL){
+					local.player origin local.location
+				}else{
+					thread coop_mod/main.scr::playerPlaceAtSpawn local.player
+				}
+//iprintlnbold_noloc("DEV: coop_mod/replace.scr::solid moved player to ("+local.location+")")
+			}
+		}
+	}
+}end
+
+//SOLIDASAP
+//makes a entity solid as soon as no player is inside it anymore
+//=========================================================================
+solidASAP:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/solidASAP->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+// safesolid <- can this actually replace coop check routines ? Need to test
+// safesolid <- can this actually replace coop check routines ? Need to test
+// safesolid <- can this actually replace coop check routines ? Need to test
+
+
+	//local.makeThisAIGreatAgain //ow, wrong slogan
+	local.makeThisAISolidAgain = 0
+	while(!local.makeThisAISolidAgain){
+		if(self == NULL){ end }
+		local.makeThisAISolidAgain = 1
+		for (local.i = 1;local.i <= $player.size;local.i++){
+			local.player =  $player[local.i]
+			if( local.player isTouching self){
+				//[206] chrissstrahl - Added compatibility for singleplayer
+				if(level.gametype == 0 || local.player.dmteam != "spectator" && local.player.health > 0 ){
+					local.makeThisAISolidAgain = 0
+				}
+			}
+		}
+		waitframe
+	}
+	//[203] chrissstrahl - added check to prevent console spam
+	if(self){ self solid }
+}end
+
+//SKIPCINEMATIC
+//check if players vote(click) to skip current cinematic
+//=========================================================================
+skip local.useOnly:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/skip->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	level.coop_skip = 1 //level wide on purpose
+	local.coop_skipping = 0
+	local.coop_needed = 0
+	
+	//[203] chrissstrahl - prevent skipping in the first few sec
+	while((level.coop_gameStartedAt + 10) > level.time){
+		wait 1
+	}
+	
+	while(level.coop_skip){
+		for (local.i = 1;local.i <= $player.size;local.i++){
+			local.player =  $player[local.i]
+			local.coop_needed++
+			
+			if(local.player.flags["coop_wantsToSkip"] == 1){
+				local.coop_skipping++
+				continue
+			}
+			
+			if( local.player.dmteam != "spectator" && local.player.health > 0 && local.player.flags["coop_isActive"] == 1 ){
+				if( local.useOnly == NIL && local.player.fireheld || local.player.useheld ){
+					local.player.flags["coop_wantsToSkip"] = 1
+					local.coop_skipping++
+				}
+			}
+		}
+		//make sure it won't skip on its own
+		if( level.coop_playerReady ){
+			//println( local.coop_skipping + ":" + (local.coop_needed / 1.5) )
+			if( local.coop_skipping >= (local.coop_needed / 1.45)){
+				level.coop_skip = 0
+				end
+			}
+		}
+
+		waitframe
+		local.coop_skipping = 0
+		local.coop_needed = 0
+	}
+}end
+
+//STOPONTOUCH
+//[200] chrissstrahl - stops coop related on touch events
+//=========================================================================
+stopOnTouch:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/stopOnTouch->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if( self == NIL || self == NULL ){
+		error ( "coop_mod/replace.scr::stopOnTouch - needs to be executed by a entity" ) 1000
+		end
+	}
+	self.flags["coop_onTouchActivate"] = NIL
+}end
+
+//TELEPORTTOONTOUCH
+//teleports a player that is touching a specific origin
+//[200] chrissstrahl - parameter1(ent) can now be vector or entity (see m1l3c.scr elevator)
+//=========================================================================
+teleportToOnTouch local.ent:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/teleportToOnTouch->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if( self == NIL || self == NULL ){
+		error ( "coop_mod/replace.scr::teleportToOnTouch - needs to be executed by a entity" ) 1000
+		end
+	}
+
+	if(self.flags["coop_onTouchActivate"] != NIL){
+		end
+	}
+	self.flags["coop_onTouchActivate"] = 1
+
+	//[200] chrissstrahl - removed check for other parameter
+	if( local.ent == NULL || local.ent == NIL ){
+		error ( "coop_mod/replace.scr::teleportToOnTouch - parameter 1 is NULL or NIL, needs to be vector or entity" ) 1000
+		end
+	}
+
+	//[200] chrissstrahl - allow detection of var type of parameter1
+	local.vartype =	waitthread coop_mod/main.scr::returnVarType local.ent NIL "replace::teleportToOnTouch"
+
+	//[200] chrissstrahl - make sure the right var type is used
+	if(local.vartype != 2 && local.vartype != 3){
+		local.varTypeName = waitthread coop_mod/main.scr::returnVarTypename local.vartype
+		error ( "coop_mod/replace.scr::teleportToOnTouch - parameter1 was of type "+local.varTypeName+", but needs to be: Enity or Vector" ) 1000
+		end
+	}
+
+	//[200] chrissstrahl - make sure we have the data for the error message once the entity NULLs
+	local.targetnameParm1 = local.ent.targetname
+
+	//[200] chrissstrahl - added check if ontouch should still be active
+	while(self != NULL && self.flags["coop_onTouchActivate"] == 1){
+		for (local.i = 1;local.i <= $player.size;local.i++){
+			local.player = $player[local.i]
+			if( local.player isTouching self ){
+				if(	local.player.dmteam != "spectator" && local.player.health > 0 &&local.player.flags["coop_isActive"] == 1){
+					local.pos = NIL
+
+					//[200] chrissstrahl - get origin of entity to warp to
+					if(local.vartype == 2){
+						if(local.ent == NULL){
+							iprintlnbold_noloc("Coop Error: teleportToOnTouch parm2 entity("+local.targetnameParm1+") missing")
+							end
+						}
+						local.pos = local.ent.origin
+					}
+					//[200] chrissstrahl - set vector directly
+					else{
+						local.pos = local.ent
+					}
+					local.player notsolid //[200] chrissstrahl - just make sure not solid is really applied
+					local.player origin local.pos
+					thread coop_mod/main.scr::playerMakeSolidAsap local.i
+				}
+			}
+		}
+		waitframe
+	}
+}end
+
+//INPVS
+//replaces $player inpvs $actor
+//i haven't the faintest what this pvs is suppose to do
+//[202] Smithy - cleaned it up a bit. 
+//treat inpvs as 'in-areaportal' (areas sealed by doors)
+//=========================================================================
+inpvs local.ent:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/inpvs->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (!local.ent){
+		error ("coop_mod/replace.scr::inpvs - parameter 1 was " + local.ent) 1000
+		end
+	}
+
+	if(level.gametype == 0){	//chrissstrahl - sp handle
+		end($player inpvs self)
+	}
+
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player =  $player[local.i]
+		if (isAlive local.player && local.player.dmteam != "spectator" && local.player.flags["coop_isActive"] == 1){
+			if(local.player inpvs local.ent){
+				end 1
+			}
+		}
+	}
+}end 0
+
+//ONTOUCHKILL
+//=========================================================================
+onTouchKill:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/onTouchKill->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+//kills players touching this entity
+	self thread killzone
+}end
+
+//RADIUSFREEZE
+//freezes any player that comes within the radius
+//this is used to prevent rushers to fuck up the mission
+//by brainlessly rushing somewhere
+//=========================================================================
+radiusFreeze local.origin local.radius:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/radiusFreeze->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if(level.gametype == 0){ end }
+
+	//used for debug, so we can see if it has been placed at the right pos
+	//spawn script_model model "models/items/Af_P_Lantern.tik" origin (local.origin) notsolid 1 scale 3
+
+	level.coop_radiusFreeze = 1
+	while(level.coop_radiusFreeze){
+		for (local.i = 1;local.i <= $player.size;local.i++){
+			local.player =  $player[local.i]
+			if( local.player.dmteam != "spectator" && local.player.health > 0 ){
+				if( vector_length( local.player.origin - local.origin) <= local.radius ){
+					if(local.player.flags["coop_radiusFreeze"] == NIL){
+						local.player.flags["coop_radiusFreeze"] = 1
+						thread freezeThisPlayer local.player
+					}
+				}
+			}
+		}
+		waitframe
+	}
+}end
+
+//STOPRADIUSFREEZE
+//stops radiusfreeze
+//=========================================================================
+stopRadiusFreeze:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/stopRadiusFreeze->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	level.coop_radiusFreeze = 0
+	waitframe
+	waitframe
+	waitframe
+}end
+
+//FREEZETHISPLAYER
+//freezes a player until a unfreeze event happens
+//=========================================================================
+freezeThisPlayer local.player:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/freezeThisPlayer->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.origin = local.player.origin
+	local.player notsolid //make sure player does not block ai paths
+	while(level.coop_radiusFreeze){
+		if(local.player == NULL){ end }
+		if(local.player.dmteam == "spectator" || local.player.health <= 0){
+			local.player.flags["coop_radiusFreeze"] = NIL
+			break
+		}
+		if(local.player.origin != local.origin){
+			thread coop_mod/main.scr::printInfo local.player ("You are not allowed to move right now") 0 1
+		}
+		//local.player physics_off
+		local.player origin local.origin
+		waitframe
+	}
+	local.player.flags["coop_radiusFreeze"] = NIL
+	thread coop_mod/main.scr::playerMakeSolidAsap local.player
+}end
+
+//PLAYERCATCHUP
+//moves players to their spawnlocation that are where we do not want them to be
+//outside - player is outside of given distance (radial)
+//within - player is inside of given distance (radial)
+//above - player is above given z coords
+//below - player is below given z coords
+//=========================================================================
+playerCatchUp local.type local.origin local.distance :{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/playerCatchUp->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if(local.type == NIL || local.distance == NIL || level.gametype == 0 ){ end }
+
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player =  $player[local.i]
+		if( local.player.dmteam != "spectator" && local.player.health > 0 ){
+			local.moveplayer = 0
+			local.playerOrigin = local.player.origin
+			if(local.type == "outside" && vector_length(local.playerOrigin - local.origin) > local.distance){
+				local.moveplayer = 1
+				//iprintlnbold_noloc("playerCatchUp outside")
+			}
+			else if(local.type == "within" && vector_length(local.playerOrigin - local.origin) <= local.distance){
+				local.moveplayer = 1
+				//iprintlnbold_noloc("playerCatchUp within")
+			}
+			else if(local.type == "above" && local.playerOrigin[2] > local.distance ){
+				local.moveplayer = 1
+				//iprintlnbold_noloc("playerCatchUp above")
+			}
+			else if(local.type == "below" && local.playerOrigin[2] < local.distance ){
+				local.moveplayer = 1
+				//iprintlnbold_noloc("playerCatchUp below")
+			}
+			if(local.moveplayer == 1){
+				thread playerPlaceAtSpawn local.i
+			}
+		}
+	}
+}end
+
+//playerKillIf
+//kills players that are where we do not want them to be
+//outside - player is outside of given distance (radial)
+//within - player is inside of given distance (radial)
+//above - player is above given z coords
+//below - player is below given z coords
+//=========================================================================
+playerKillIf local.type local.origin local.distance :{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/playerKillIf->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if(local.type == NIL || local.distance == NIL ){ end }
+
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player =  $player[local.i]
+		if( local.player.health > 0){
+			//sp or valid coop
+			if(level.gametype == 0 || local.player.dmteam != "spectator" && local.player.flags["coop_isActive"] == 1){
+				local.playerOrigin = local.player.origin
+				local.killplayer = 0
+				if(local.type == "outside" && vector_length(local.playerOrigin - local.origin) > local.distance){
+					local.killplayer = 1
+				}
+				else if(local.type == "within" && vector_length(local.playerOrigin - local.origin) <= local.distance){
+					local.killplayer = 1
+				}
+				else if(local.type == "above" && local.playerOrigin_z > local.distance ){
+					local.killplayer = 1
+				}
+				else if(local.type == "below" && local.playerOrigin_z < local.distance ){
+					local.killplayer = 1
+				}
+				if(local.killplayer == 1){
+					//terminate player
+					local.player normal_damage (local.player.health + 1)
+					//make sure player will not respawn inside killzone
+					thread coop_mod/main.scr::resetSpawn local.player
+				}
+			}
+		}
+	}
+}end
+
+//waits until a player is within the given distance
+//=========================================================================
+waitWithinDistance local.origin local.distance:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/waitWithinDistance->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if(local.origin == NIL || local.distance == NIL ){ end }
+	while(!waitthread withinDistance ( local.origin ) local.distance ){
+		waitframe
+	}
+	//iprintlnbold_noloc("DEV: distance:"+vector_length(local.origin-$player.origin))
+}end
+
+//grabs the hand tag origin of every player
+//stores it in a level var, so we can use it
+//=========================================================================
+grabAllPlayerHandTagOrigins:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/grabAllPlayerHandTagOrigins->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	//reset old values
+	for (local.i = 1;local.i <= 8;local.i++){
+		level.flags["coop_player"+local.i+"HandTagOrigin"] = NIL
+	}
+	//grab new values
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player = $player[local.i]
+		if( local.player.health > 0 && local.player.dmteam != "spectator" && local.player.flags["coop_isActive"] == 1){
+			level.flags["coop_player"+local.i+"HandTagOrigin"] = local.player gettagposition "tag_weapon_right"
+		}
+	}
+}end
+
+//MISSIONFAILED
+//fails the mission and fades to red
+//=========================================================================
+missionfailed:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/missionfailed->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if( level.gametype == 0 ){ end }
+	missionfailed //keep this, as we do not know what else it might trigger and signal the mission status
+
+	local.fadetime = 3
+
+	//fadeout to red
+	fadeout 1 0.5 0 0 local.fadetime
+	wait (local.fadetime + 2)
+	
+	//[200] chrissstrahl - same thing just using function now
+	thread coop_mod/main.scr::restartMap
+}end
+
+//[200] Smithy - yes, there is an item and take func up above.
+//but i felt it too much to modify them to include my functionality.
+//this should be used specifically for giving *weapons* to players.
+//Optional use states (with delay) are available...
+//NOTES:
+// 	- If you add a player to local.playerToUse (usually the player triggering it),
+//    and also put "one" in local.use, then only those will 'use' weapon.
+//    You may not want other players being hassled with unwanted
+//    weapon swaps who are far away fighting for example.
+//  - If you want all players to use, put "all" in local.use arg.
+//  - If you want no players to use, put NIL or "none" in local.use arg.
+//
+//example of this being used is m3l1a.scr::playerweapon_springfield_give - [204] chrissstrahl - Notes: giveWeapon giveItem addWeapon addInventory
+//=========================================================================
+givePlayerWeapon local.weapon local.playerToUse local.use local.wait:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/givePlayerWeapon->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (level.gametype == 0){
+		$player item local.weapon
+		end
+	}
+
+	wait game.ms //as takePlayerWeapon can take a short time
+	wait game.ms //[202] Smithy - as it takes some time for them to be added to their loadout
+	wait game.ms //[202] Smithy - as it takes some time for them to be added to their loadout x2
+	
+	//[202][hotfix] Smithy
+	level.coop_noWeapon = game.false
+	
+	if (!local.weapon){ end }
+	if (local.use == NIL){ local.use = "none"}
+
+	for (local.i = 1; local.i <= $player.size; local.i++){
+		local.player = $player[local.i]
+
+		if (!isAlive local.player || local.player.isSpectator || !local.player.flags["coop_isActive"]){
+			continue
+		}
+
+		//check if he already has this weapon (this is why we have extra waits up above, so we can be sure it is found in their inv)
+		if (waitthread game.item::playerHasWeapon local.player local.weapon){
+			println "(coop_mod/replace.scr::givePlayerWeapon): " local.player.netname " already has a " local.weapon
+			if (local.use == "one" && local.playerToUse && local.player == local.playerToUse){
+				local.playerToUse = NULL //ok, no weapon found on him, so he shouldn't use it
+			}
+			continue
+		}
+
+		//local.addToLoadout = game.true
+		local.player waitthread game.item::givePlayerWeapon local.weapon
+
+		if (local.use == "all" || !(waitthread game.item::returnActiveWeapon local.player) && local.player.flags["coop_takenActiveWeapon"]){
+			local.player thread game.item::usePlayerWeapon local.weapon local.wait //for 'multithreaded' delays
+		}
+	}
+	if (local.use == "one"){
+		if (local.playerToUse && local.playerToUse.classname && local.playerToUse.classname == "Player" && local.playerToUse.dmteam != "spectator"){
+			local.playerToUse thread game.item::usePlayerWeapon local.weapon local.wait
+		}
+	}
+	//if (local.addToLoadout){
+		thread game.item::addWeaponToLoadout local.weapon
+	//}
+}end
+
+//[200] Smithy - this should be used specifically for taking *weapons* from players
+//=========================================================================
+takePlayerWeapon local.weapon:{
+//=========================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/takePlayerWeapon->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (level.gametype == 0){
+		$player take local.weapon
+		end
+	}
+
+	if (!local.weapon){ end }
+
+	for (local.i = 1; local.i <= $player.size; local.i++){
+		local.player = $player[local.i]
+		local.player thread game.item::takePlayerWeapon local.weapon
+	}
+	thread game.item::removeWeaponFromLoadout local.weapon
+}end
+
+//[201] Smithy - used to replace triggers with another (or just copy triggers as many times as you want).
+//We can use this if we want to replace a trigger_once with a trigger_multiple
+//to give us control over who activates the trigger (just an example)
+// - reduced var name sizes and added spawnflags arg
+//============================================================================
+cloneTrigger local.oldTrig local.newTrigType local.newName local.newThread \
+local.removeOldTrig local.spawnFlags:{
+//============================================================================
+if(1 || level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/cloneTrigger->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (local.spawnFlags == NIL){ local.spawnFlags = 0 }
+
+	local.newTrig = spawn local.newTrigType targetname local.newName spawnflags local.spawnFlags //[201] Smithy - trigger spawnflags only work when applied to spawn command
+	local.newTrig model local.oldTrig.brushmodel
+	local.newTrig origin local.oldTrig.origin
+	//[204]chrissstrahl - prevents funky script behaviour if given thread is a empty string
+	if(local.newThread && local.newThread != ""){
+		local.newTrig setthread level.script::local.newThread
+	}
+	
+	if (local.removeOldTrig){
+		local.oldTrig remove
+	}
+}end
+
+//[201] Smithy - i can see us using this type of method in future. lets make it reusable.
+//Use this if you want to validate the parm.other hitting the trigger. 
+//You don't need to spawn a new trigger.
+//If you just want to only validate (not replace trigger) do:
+//waitthread coop_mod/replace.scr::validateTriggerActivator "threadName" "validEntity"
+//============================================================================
+validateTriggerActivator local.thread local.validActivator local.newTrigType \
+local.newTrigName local.newTrigSpawnFlags local.removeOldTrig:{
+//============================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/validateTriggerActivator->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.activator = parm.other
+	local.previousThread = parm.previousthread
+	local.trigger = self
+	if (local.activator != local.validActivator){
+		if (local.newTrigType && local.newTrigName && local.trigger.targetname != local.newTrigName){
+			thread cloneTrigger local.trigger local.newTrigType local.newTrigName \
+			local.thread local.removeOldTrig local.newTrigSpawnFlags
+		}
+		//println "you're NOT the right activator!"	
+		local.previousThread end //[201] Smithy - end the calling thread
+		end
+	}
+	//println "you ARE right activator! well done!"
+	local.trigger delete
+}end
+
+//[202] Smithy - clone any object with a brush model
+//this is a more generic method, but can be used to clone triggers too.
+//it will return the object, then you can then do what you wish with it.
+//If you want to clone an object completely (including class), just do:
+//local.newObj = waitthread coop_mod/replace.scr::cloneBrushObject local.objToClone
+//otherwise you can specify the object type you want to create in the class arg.
+//Optional ability to feed in spawnflags.
+//============================================================================
+cloneBrushObject local.sourceObj local.class local.spawnFlags:{
+//============================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/cloneBrushObject->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (local.spawnFlags == NIL){ local.spawnFlags = 0 }
+	if (local.class == NIL){ local.class = local.sourceObj.classname }
+
+	local.newObj = spawn local.class spawnflags local.spawnFlags
+	local.newObj model local.sourceObj.brushmodel
+}end (local.newObj)
+
+//[202] Smithy - make sure the entity has actually gone. use waitthread
+//============================================================================
+delete:{
+//============================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/delete->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	self delete
+	level waittill postthink
+}end
+
+//[202] Smithy - replace attackplayer to stop spam when client 0 is missing
+//============================================================================
+attackplayer local.player:{
+//============================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/attackplayer->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (!$player || !isAlive self){ end }
+
+	if (!local.player){
+		if (level.coop_clientZero){
+			self attackplayer
+		}else{
+			self favoriteenemy $player[1] //[202] Smithy - sure, in this instance their AI will be off anyway, but it sets them up for when client 0 appears again
+		}		
+	}else{
+		self favoriteenemy local.player //[202] Smithy - there may be some benefit to picking their initial target. we'll see...
+	}
+}end
+
+//[204] Chrissstrahl - replace open for doors
+//============================================================================
+open:{
+//============================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/open->"+level.cMTE+"" )}
+	local.player = exec coop_mod/replace.scr::player_closestTo self
+
+	if(local.player == NULL){
+		local.player = $world
+	}
+	self open local.player
+}end
+
+//[204] Chrissstrahl - replace favoriteenemy
+//============================================================================
+favoriteenemy:{
+//============================================================================
+if(level.cMTE_coop_replace){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread replace/favoriteenemy->"+level.cMTE+"" )}
+	local.player = exec coop_mod/replace.scr::player_closestTo self
+
+	self favoriteenemy local.player
+}end
+
+//[204] Chrissstrahl - replace create_squad - IF USED ON or SELF IS PLAYER
+//============================================================================
+create_squad:{
+//============================================================================
+	if( $coop_playerSquad == NULL ){
+		
+		//create a new entity that we accsess instead of a player that could be leaving the server at any given moment
+		spawn info_notnull targetname "coop_playerSquad"
+		//give the MULTIPLAYER server a moment to spawn and update the new entity
+		waitframe
+		
+		$coop_playerSquad thread create_squad_maintain
+	}
+	
+	//now start the original stock function
+	$coop_playerSquad waitthread global/squad.scr::create_squad
+}end
+
+//[204] Chrissstrahl - makes sure there is a valid player maintained
+//============================================================================
+create_squad_maintain:{
+//============================================================================
+	while($coop_playerSquad.squad){ //check for info_notnull reference entity
+		local.findNewLeader = 1
+		if($coop_playerSquad.squad.leader){ //check if leader player is still there
+			if($coop_playerSquad.squad.leader.health > 0 && $coop_playerSquad.squad.leader.dmteam != "spectator"){
+				local.findNewLeader = 0
+			}
+		}
+		
+		if(local.findNewLeader){
+			if(level.coop_player){
+				$coop_playerSquad.squad.leader = level.coop_player
+			}
+		}
+		
+		waitframe
+	}
+}end
+
+//[204] Chrissstrahl - replace join_squad - IF USED ON or SELF IS PLAYER
+//============================================================================
+join_squad:{
+//============================================================================
+	if($coop_playerSquad == NULL){
+		waitthread create_squad
+		waitframe
+	}
+	
+	local.found = self waitthread global/squad.scr::join_squad $coop_playerSquad
+}end local.found
+
+//[206] Chrissstrahl - replaces fullheal
+//=========================================================================
+fullheal:{
+//=========================================================================
+	if(level.gametype == 0){
+		$player fullheal
+	}
+}end

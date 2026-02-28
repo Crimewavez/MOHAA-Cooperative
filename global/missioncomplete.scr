@@ -1,0 +1,36 @@
+//chrissstrahl - modified original file for loading next map
+//2018.07.15
+
+main local.nextlevel local.bsp local.skipFade:{
+	//[200] Smithy - store the thread name
+	local.threadName = "global/missioncomplete.scr::main"
+
+	if (local.skipFade != 1){
+		local.skipFade = 0
+	}
+	
+	//[200] chrissstrahl - have a seperate coop handle
+	if(waitthread coop_mod/main.scr::inCoopMode){
+		waitthread coop_mod/missioncomplete.scr::main local.nextlevel local.bsp local.skipFade
+		end
+	}
+
+
+	if ($player.health <= 0)
+		pause
+
+	$player stopwatch 0	
+	if (local.nextlevel != NIL)
+	{
+		if (local.bsp != NIL)
+		{
+			game.loadout = false
+			bsptransition local.nextlevel local.skipFade
+		}
+		else
+		{
+			game.loadout = NIL
+			leveltransition local.nextlevel local.skipFade
+		}
+	}
+}end

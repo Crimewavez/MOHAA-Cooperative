@@ -1,0 +1,311 @@
+//============================================================================
+main: {
+//============================================================================
+	fadeout .001 0 0 0 1
+	
+	//[204] chrissstrahl - init coop mod
+	waitthread coop_mod/main.scr::main 			//chrissstrahl - start coop mod, wait for this to finish
+	level.script = "maps/e2l3.scr"
+	
+	//[204] chrissstrahl - restore mission after failure
+	waitthread coop_levelLoadedafterFailure
+	
+	//[204] chrissstrahl - change so that the jeep triggers the sequence regardless if a player is in it
+	thread coop_mod/replace.scr::cloneTrigger $Start_Tanks "trigger_vehicle" "Start_Tanks" "" 1 0
+	
+	//wait 0.5
+	
+	/* //[204] chrissstrahl - stop spam
+	println "-----------------------------------------------"
+	println "-----------------------------------------------"
+	println "-----------------------------------------------"
+	println "E2L3"
+	println "-----------------------------------------------"
+	*/
+	
+
+	level.coop_forceDropWeapons = game.true 		//chrissstrahl - allow weapon drops on this map
+
+	exec global/auto.scr e2l3
+	setcvar g_mission 2
+	exec global/exploder.scr
+	exec global/ambience.scr e2l3
+	
+	//[204] chrissstrahl - if save / checkpoint was loaded, skip hacks
+	if(!level.coopSave){
+		waitexec maps/e2l3/hacks.scr
+	}
+	
+	exec maps/e2l3/aicleanup.scr
+	
+	thread InitLevel
+
+	//	waitthread maps/e2l3/TankCrash.scr::InitTankCrash
+	//	level waittill spawn
+
+	thread startMusic_e2l3_main
+
+	level waittill prespawn
+
+	// AI Values
+	level.aicrouchchance = 55
+	level.aipronechance = 45
+
+	// create objectives
+	waitthread global/ObjMgr.scr::Init
+	waitthread global/ObjMgr.scr::InitObj	"meet82nd"		"Rendezvous with 82nd Airborne"
+	waitthread global/ObjMgr.scr::InitObj	"assist82nd"		"Assist 82nd Airborne"
+	waitthread global/ObjMgr.scr::InitObj	"clearTown"		"Secure the Village"
+	waitthread global/ObjMgr.scr::InitObj	"repelTanks"		"Repel Tank Assault"
+
+	//[204] chrissstrahl
+	if(level.gametype == 0){
+		level waittill spawn
+	}else{
+		level waittill playerspawn
+	}
+	
+	drawhud 0
+
+	// init sections 
+	waitthread maps/e2l3/IntroHouse.scr::Init
+	waitthread maps/e2l3/building1.scr::Init
+	waitthread maps/e2l3/Glider.scr::Init
+	waitthread maps/e2l3/BattleHouse.scr::Init
+	waitthread maps/e2l3/AirDrop.scr::Init
+	waitthread maps/e2l3/Vineyard.scr::Init
+	waitthread maps/e2l3/Town.scr::Init
+	waitthread maps/e2l3/FinalHouse.scr::Init
+
+	// finish objectives init (set up compass targs, possibly reveal first objectives, possibly set current obj)
+	waitthread global/ObjMgr.scr::RevealObj	"meet82nd"
+	waitthread global/ObjMgr.scr::SetObjCompassTarg "meet82nd" $battleAirborne_Commander
+	waitthread global/ObjMgr.scr::SetCurrObjStrategy		"inOrder"
+
+	if (level.nofog == 1) {
+		end // MPS because Mercieca told me to...
+		$world farclipoverride 10000
+		$world farplane 10000
+		$world farplane_bias 10000
+	}		
+	
+	//[204] chrissstrahl - scale down blockade if coop save was loadad
+	if($noGoingBackBlockade){
+		$noGoingBackBlockade scale 0.75
+	}
+}end
+
+//if the map was loadad via token or coop save state or something
+//==========================================================[204] chrissstrahl
+coop_levelLoadedafterFailure: {
+//============================================================================
+	if(level.gametype == 0){ end } //seta coop_save e2l3_finalHouse
+	
+	level.coopSave = getcvar("coop_save")
+	if(level.coopSave != "e2l3_finalHouse" ){
+		end
+	}
+	
+	//level.coopSave = "e2l3_finalHouse"
+	
+	level.skipintrohouse	= 1 //start with the jeep and tank
+	level.skipglider		= 1 //right after the tank is destroyed and a crashed glider spends some ammo
+	level.skipbattlehouse	= 1 //the house where the mg has pinned the troops down, right after the trucks
+	level.skipairdrop		= 1 //soldiers dropping from the air
+	level.skipvineyard		= 1 //puts you right at the paratroopers landing zone at the entrace of the "town"
+	level.skiptown			= 1 //end of town where destroyed tank is and the MG-Nest
+	
+	level.flags[coop_spawn1angles] = ( 0 9.207 0 ) 
+	level.flags[coop_spawn1origin] = ( 536 38 -445 ) 
+	level.flags[coop_spawn2origin] = ( 576 18 -445 ) 
+	level.flags[coop_spawn3origin] = ( 576 58 -445 ) 
+	level.flags[coop_spawn4origin] = ( 616 -21 -445 ) 
+	level.flags[coop_spawn5origin] = ( 616 18 -445 ) 
+	level.flags[coop_spawn6origin] = ( 616 58 -445 ) 
+	level.flags[coop_spawn7origin] = ( 656 18 -445 ) 
+	level.flags[coop_spawn8origin] = ( 656 58 -445 ) 
+	
+	//prevent players going back
+	thread coop_mod/replace.scr::spawnclip ( 620 560 -400 ) ( -24 -64 -10 ) ( 22 64 128 ) "noGoingBackBlockade" 1 90
+		
+	println("==== ---------- ====")
+	println("==== RESET CVAR ====")
+	println("==== COOP_SAVE- ====")
+	println("==== AFTER-LOAD ====")
+	println("==== ---------- ====")
+	setcvar "coop_save" ""
+	
+	//[204] chrissstrahl - cleanup some shit
+	$c47_path remove
+	$summonPlane remove
+	$c47 remove
+	
+	$Start_Tanks remove
+	$starttank remove
+	$startjeep remove
+	$jeepCrashGate_BloodyHell remove
+	$driver remove
+	
+	$house1_stayinside remove
+	$house1_wentoutside remove
+	$build1exp1 remove
+	$build1exp2 remove
+	$build1exp3 remove
+	$startbazooka remove
+	
+	$GliderSceneTrigger remove
+	$summonTrucks remove
+	$battleTrigger remove
+	$gliderammotrigger remove
+	
+	$battleTriggerDamage remove
+	$stopHouseParade remove
+	$battleAirborne_Trooper remove
+	
+	$townTrigger remove
+	
+	thread coop_mod/butler.scr::removePath $open_jeep_path2 0.1
+	thread coop_mod/butler.scr::removePath $tankpath 0.2
+	thread coop_mod/butler.scr::removePath $glidertruck 0.3
+	thread coop_mod/butler.scr::removePath $glidertruck2 0.4
+	
+	thread coop_mod/butler.scr::removeArray $t229234530
+	thread coop_mod/butler.scr::removeArray $t229234548
+	
+	//ready spawnlocation check if player gets close
+	thread coop_mod/spawnlocations.scr::e2l3_update5
+}end
+
+
+//============================================================================
+InitLevel: {
+//============================================================================
+	level.bomb_damage = 800
+	level.bomb_explosion_radius = 400
+
+	level.skip_fadein = 1 //@chrissstrahl
+	if (level.skip_fadein == 0) {	
+		waitthread Fadein 
+	}
+
+	//[204] chrissstrahl
+	waitthread coop_mod/replace.scr::waitTillPrespawn
+
+	//[204] chrissstrahl
+	if(level.gametype == 0){
+		$player heal 1
+	}
+	
+	level.commander_kill = 0
+	waitexec global/loadout.scr
+
+	//[204] chrissstrahl
+	waitthread coop_mod/replace.scr::waitForPlayer
+
+	//[204] chrissstrahl
+	waitthread coop_mod/replace.scr::create_squad
+	
+	//level.autosave = 1
+	//exec global/autosave.scr level.autosave	//"Starting"
+	//level.autosave++	
+}end
+
+//============================================================================
+Fadein: {
+//============================================================================
+	//[204] chrissstrahl
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player =  $player[local.i]
+		local.player.flags["coopViewAngleMemory"] = local.player.viewangles
+		local.player physics_off
+	}
+
+	exec global/fadein.scr
+	waitframe
+
+	waitthread global/fadein.scr::DoFadeIn e2l3_1 e2l3_2 e2l3_3 NIL 1
+	
+	//[204] chrissstrahl
+	//undo any mousemovment during the hud stuff
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player =  $player[local.i]
+		local.viewMem = local.player.flags["coopViewAngleMemory"]
+		if(vector_length(local.viewMem) > 1){
+			local.player.viewangles = local.viewMem
+		}
+		local.player physics_on
+	}
+}end
+
+//============================================================================
+startMusic_e2l3_main: {
+//============================================================================
+	waitthread coop_mod/replace.scr::waitTillPrespawn
+
+	if (level.skiptown != 1) {
+		// start looping at intro
+		
+		//[204] chrissstrahl
+		thread coop_mod/replace.scr::tmstartloop "sound/music/mus_11a_surprise.mp3"
+		
+		
+		while (level.startTankDead != 1) {
+			wait 0.1
+		}
+	
+		// start looping after destroying the first tank
+		// (at opening of level)
+		waitthread global/music.scr::StopSong 1.5
+		
+		//[204] chrissstrahl
+		thread coop_mod/replace.scr::tmstartloop "sound/music/E2L1_Streets_of_Paris.mp3"
+	}
+
+	if (level.skipairdrop != 1) {
+		while (level.met82nd != 1) {
+			wait 0.1
+		}
+
+		waitthread global/music.scr::StopSong 1.5
+		
+		//[204] chrissstrahl
+		thread coop_mod/replace.scr::tmstartloop "sound/music/mus_14a_action.mp3"
+	}
+
+	$FH_OnTopFloorTrigger waittill trigger
+	waitthread global/music.scr::StopSong 3
+	
+	while (level.tanksMoving != 1) {
+		waitframe
+	}
+	
+	//[204] chrissstrahl
+	thread coop_mod/replace.scr::tmstartloop "sound/music/medicdance.mp3" //@chrissstrahl
+	
+
+	while (level.tanksDefeated == 0) { 
+		waitframe
+	}
+
+	waitthread global/music.scr::StopSong 1.5
+}end
+
+//mus_14a_action.mp3                 start playing after encountering the the 82nd Airborne outside the village                         
+//medicdance.mp3                     start looping after tanks appear at end
+
+//============================================================================
+GiveMedal: {
+//============================================================================
+	//E2 Specific Medal, the Air Medal
+	//[204] chrissstrahl
+	if(level.gametype == 0){
+		setcvar "g_medal4" "1"
+	}
+}end
+
+//[204] chrissstrahl - this is called from e2l1/objectives script
+//============================================================
+coop_missioncomplete:{
+//============================================================
+	exec global/missioncomplete.scr (level.coopNextMap) 1
+}end

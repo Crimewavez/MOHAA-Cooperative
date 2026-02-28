@@ -1,0 +1,420 @@
+Changelog started 2019.03.13
+HaZardModding Coop Mod for Medal of Honor Allied Assault War Chest
+
+MINOR ISSUE KNOWN WITH THIS VERSION
+- e2l2 to few fallback spawn locations at the airfield, entering players might be further away from the team
+- e2l2 bikes are taking far to much damage or are extremely difficult to destroy
+- e2l2 if player riding with the jeep leaves the server, some triggers might not fire
+
+VERSION____________2.05
+Added: variables.scr::getNameAppendCommands
+Added: Keybind for Coop Admin Menu
+Added: Coop Admin Menu UI and Script Files
+Changed: player.scr::manageNamechange
+Changed: player.scr::manageNamechange
+Changed: Gametype name from HZM Coop Mod to Cooperative
+
+VERSION____________2.04
+Added: e2l3 for Coop
+Added: e2l2 for Coop
+Added: replace.scr::player_closestInFront
+Added: Developer Menu and Login to Keybind List
+Added: e2l2 to Callvote List - callvote.cfg
+Added: e2l2 to Start Server List - e2.cfg
+Added: replace.scr::open to open doors in coop
+Added: replace.scr::isinside to do checks in 
+Added: developer.scr::developerLogfileActivate to standardize logfile handle
+Added: developer.scr::developerLogfileDeactivate to standardize logfile handle
+Added: spawnlocations.scr spawnlocations for e2l2
+Updated: developer.scr::printmarkers with new logfile func
+Updated: developer.scr::printstatus with new logfile func
+Fixed: replace.scr::unglue conflicting code to show player
+
+VERSION____________2.03 - hotfix
+Fixed: LMS Callvote not working
+
+VERSION____________2.03 - 2021.12.24
+Added: Server reboot Configfile sv_quit.cfg to allow reboot via callvote
+Added: Developer Login Feature and Developer Menus for testing and debugging
+Added: Developer Token Authentification Autologin
+Added: Check to exclude Player in noclip in Coop Distance and Range Scripts
+Added: m1l3a players can now explore the map without being glued to the Jeep
+Added: m1l3b players can now explore the map without being glued to the Jeep
+Added: m3l1a All players spawning near shingle once it has been blown
+Added: m3l2 Players moved to Radar/FLAK position when they are to far behind
+Added: m3l2 Spawnlocations added to keep players closer to the mission progress
+Added: m5l2a Spawnlocations for all players
+Added: m5l2b Spawnlocations for all players
+Added: m5l3 Spawnlocations for all players
+Added: m6l1a Spawnlocations for all players
+Added: m6l1b Spawnlocations for all players
+Added: m6l1c Spawnlocations for all players
+Added: m6l2a Spawnlocations for all players
+Added: m6l2b Spawnlocations for all players
+Added: m6l3a Spawnlocations for all players
+Added: sound.scr used for soundlength definitions when waiting for sound in scripts
+Added: replace.scr::playsound_wait now uses predefined waits
+Fixed: server.scr weapon loadout issue when in g_gametype 1 
+Fixed: All Allied Assault Brifings getting stuck sometimes.
+Fixed: e1l2/hideout.scr::InfantryWorkOnTank causing massive spam to logfiles waiting for player
+Fixed: m5l1a Developer Debug Text printing to all players
+Fixed: m5l2a, m5l2b Player exiting tank staying in spectator or having a invisible weapon
+Fixed: m5l2b MG42 Gunner not getting killed by explosion, but turning invible and hauntig players
+Fixed: e1l4 maproom.scr::invisibleMan Mister invisible being spawned multiple times
+Fixed: chainspawner.scr::spawnersetup causing console errors if no player is connected
+Fixed: friendly.scr::ailookrun using $player istead of Coop replacement, causing console errors
+Fixed: objectives.scr::add_objectives missing check, causing console spam: main.scr::returnVarType was NIL [NIL] -> NIL
+Fixed: objectives.scr::coop_objectivesSendPlayer bad player exist check, causing console spam
+Fixed: main.scr::getClient using a bad handling logic causing script errors
+Fixed: main.scr::playerMakeSolidAsapCheckTouching causing console errors when a player disconnected
+Fixed: replace.scr::solidASAP missing entity exist check
+Fixed: replace.scr::unholster causing sometimes console spam
+Fixed: headaim.scr::main bad entity exist check
+Fixed: level.coop_dedicated not being set correctly
+Fixed: Un used Client CVAR coop_fov being used in the Coop Scripts
+Fixed: FOV being reset when a new uniform/disguise is applied to player
+Fixed: FOV being reset when a new uniform/disguise is taken from player
+Fixed: m3l2 ::scene11_mgspawn_targeting not working correctly in coop
+Fixed: m3l2 ::scene7_machinegun not working correctly in coop
+Fixed: e1l3 briefing.scr::RestartWallBattleFinalTime causing console spam
+Fixed: e1l3 courtyard.scr::Chaser1ThinkThread not working correctly in coop
+Fixed: e1l3 roofjaunt.scr::spawnBigGerman not working correctly in coop
+Fixed: e1l3 roofjaunt.scr::GuyGoToRoof causing console spam
+Fixed: m1l2b ::coop_playerJustDied creating console spam if vehicles are removed
+Fixed: m4l1 spectating player could get the mission stuck when fyling to the pilot without joing in first
+Fixed: m4l3 Mission breaking if any other player than client 0 spawns first
+Fixed: e1l3 getting a player stuck on respawn at Uniform Swap
+Fixed: e1l3 failling at Uniform Swap and bejond breaking the mission
+Fixed: Players getting stuck inside each other if spawned at same spot
+Fixed: FOV handle getting left in playername
+
+VERSION____________2.02
+Fixed: Discordlink in hzm_install.txt
+Fixed: Serveral smaller bugs
+Added: Script based FOV for all HZM Coop Servers
+Added: FOV selection in Video Menu
+Added: e1l4
+Added: training
+Added: m4l0
+changelog is discontinued.
+Most changes are not listed.
+Approx number of changes arround 200.
+
+VERSION____________2.01
+Added: coop_start.urc, Last Man Standing option
+Added: hzm_install.txt section MASTER SERVER FIX
+Added: hzm_install.txt section HOW TO OPEN CONSOLE
+Added: Server side Callvote Menu pk3-file ( zzzzzz_co-op_hzm_mod_mohaa_callvote.pk3 )
+Added: hzm_cvars.txt, containing coop specific cvar informations
+Changed: main.scr level.coop_lmsLifes to level.coop_lmsLives
+Changed: main.scr level.prevCoopLmsLifes to level.prevCoopLmsLives
+Changed: main.scr ::lmsCheckLifes to ::lmsCheckLives
+Changed: main.scr ::lmsGetRemainingLifes to ::lmsGetRemainingLives
+Changed: main.scr :: fiendlyFindPlayer to friendlyFindPlayer
+Changed: coop_lmsLifes cvar to coop_lmsLives
+Changed: hzm_install.txt section HOW TO INSTALL, to include instructions for callvote menu
+Changed: coop_start.urc, version info string
+Changed: coop_start.urc, Password field is now bigger
+Changed: bind.scr, removed Coop Drop Weapon (deprecated feature)
+Fixed: coop_start.urc, Dedicated Server button not working
+Fixed: hzm_install.txt section KNOWN ISSUES
+Fixed: Typo LMS-Lifes showing in Objectives Menu
+Fixed: vehicles_thinkers.scr, buggy tank exit
+
+VERSION____________2.00
+Fixed: coop_start.urc spelling/typo Breakthough in Menu
+Fixed: ubersounds.cr crashes on multiplayer maps
+Fixed: Loading of maps in sv_maplist rather than loading next coop map
+Fixed: Spotlight error printing in console on m1l3a in spotlight.scr
+Fixed: Shader general_industrial/verticalbrace, removed wood, added fence surface parameter
+Fixed: Shader general_industrial/deckgrate_set1, removed wood, added fence surface parameter
+Fixed: Shader general_industrial/strangebrace1b, removed wood, added fence surface parameter
+Fixed: Shader general_industrial/strangebrace1, removed wood, added fence surface parameter
+Fixed: Shader general_industrial/ibeam_vert, added fence surface parameter
+Fixed: Shader general_industrial/ibeam_flat2, added fence surface parameter
+Fixed: Shader general_industrial/strangebrace1straight, removed wood, added fence surface parameter
+Fixed: Shader general_industrial/jh_holeflr1, changed to wood to metal, added fence surface parameter
+Fixed: Shader general_industrial/deckgrate_set1a, removed wood surface parameter
+Fixed: missing level.coop_aaMap = 1 var configuration on several briefing level-scripts
+Fixed: briefing1.scr to briefing6.scr getting stuck because of command sounddone
+Fixed: briefing3.scr bad map-load enties in: level.coopNextMap and level.coopPrevMap
+Fixed: briefing4.scr bad map-load enties in: level.coopNextMap and level.coopPrevMap
+Fixed: m1l3c.scr issues with the lift getting players stuck
+Fixed: m1l1.scr intro song looping, not playing any other song
+Fixed: m1l2a.scr::flagthread9 Grillo not planting Explosive at Flak (waittill sounddone 'dfr_M1L2_139m_2')
+Fixed: m1l2a.scr missing entity reference (level.friendly1 waittill movedone)
+Fixed: m1l2a.scr several occurences of bad type given as parameter 1 to func withinDistanceOf
+Fixed: m1l2b.scr::coop_playerJustDied passing null entity
+Fixed: m1l2b.scr::coop_playerJustDied removed dev printout
+Fixed: m1l3c.scr::coop_setup missing end
+Fixed: m1l3c.scr::coop_liftTop missing end
+Fixed: m1l3c.scr::coop_liftPit missing end
+Fixed: m1l3c.scr::coop_updateSpawn missing end
+Fixed: m1l3c.scr::coop_updateSpawnLighthouse missing end
+Fixed: m3l2.scr Ramsey baricaded door bug
+Fixed: m3l2.scr exec of headaim.scr missing $player
+Fixed: m3l3.scr Panzerschreck at tank being difficult to pick up
+Fixed: m3l3.scr::scene4_spawndetector4_control endlessly spawning enemies
+Fixed: m3l1b.scr ::seq_bunker_middle_radio sounddone
+Fixed: m3l3.scr ::coop_playerJustDied to reset Panzerschreck status
+Fixed: m3l3.scr some console messages spamming
+Fixed: m3l3.scr Panzerschreck at Tank location
+Fixed: m3l3.scr::halftrack_mg_targeting targeting NULL player
+Fixed: m3l3.scr::bomb_explodes dead halftrack health set to 1
+Fixed: m3l3.scr::scene4_tank_targeting disabled developer printout (was spamming console)
+Fixed: m3l3.scr::scene4_spawndetector2_control fixed call to NULL entity
+Fixed: m3l3.scr::scene4_spawndetector3_control fixed call to NULL entity
+Fixed: m3l3.scr::scene4_spawndetector4_control fixed call to NULL entity
+Fixed: m3l3.scr::scene4_spawndetector4_control made set origin code compatible to bt
+Fixed: m3l3.scr::scene6_mgspawn_targeting removed developer printout
+Fixed: m3l3.scr fixed halftrack
+Fixed: m4l1.scr bad map-load entry in: level.coopNextMap 
+Fixed: m4l1.scr NULL reference in objectives setup (pilot)
+Fixed: m4l2.scr bad map-load enties in: level.coopNextMap and level.coopPrevMap
+Fixed: m4l3.scr bad map-load entry in: level.coopPrevMap 
+Fixed: m4l3.scr::coop_playerJustSpawned reference to self, should be local.player
+Fixed: m4l3.scr::intro_truck_lockview playerview for multiplayer
+Fixed: m4l3.scr::end_truck fixed healt being used instead of health
+Fixed: m5l1a.scr bad map-load entry in: level.coopNextMap
+Fixed: m5l1b.scr Player Bazooka status being retained on death
+Fixed: m5l1b.scr ::coop_playerJustDied to reset Panzerschreck status
+Fixed: m5l2a.scr buildings destroyable by regular gunfire and bashing
+Fixed: m6l1a.scr level.coop_debugSpawn being set to 1
+Fixed: m6l1c.scr level.coop_debugSpawn set to 1
+Fixed: m6l1c.scr missing has_disguise
+Fixed: m6l1c.scr paper pickup sound not playing
+Fixed: m6l3d.scr Gasmask hud showing
+Fixed: m6l3d.scr Gasmask sound playing
+Fixed: m6l3e.scr Gasmask hud showing 
+Fixed: main.scr added timescale to speedup auto map load check feature
+Fixed: main.scr::playerPrimarySwapCancel not working in Singleplayer
+Fixed: main.scr::getActiveWeapon not working in Singleplayer
+Fixed: main.scr::isPlayerActive returning NIL instead of Zero if player is dead in Singleplayer
+Fixed: main.scr::fiendlyFindPlayer not being singleplayer compatible
+Fixed: main.scr::managePlayerToFollow not being singleplayer compatible
+Fixed: main.scr::playerMakeSolidAsap Special-Entity check inside player check loop (bad performance)
+Fixed: main.scr::fiendlyFindPlayer missing handle for singleplayer
+Fixed: main.scr level.script var using unfiltred mapname
+Fixed: global/mg42.scr::turret_second_trigger using $player
+Fixed: global/ai.scr::foealarm $player references
+Fixed: global/ai.scr::foealarmhit cleaned up code
+Fixed: global/ai.scr::enemyspawnertrigger cleaned up code
+Fixed: global/ai.scr::spawnfortfriend $player references
+Fixed: global/ai.scr::alarmspawn $player references
+Fixed: global/ai.scr::areathink $player references
+Fixed: global/ai.scr::enemyspawned $player references
+Fixed: global/ai.scr::friendlythink $player references
+Fixed: loadout.scr Actors not dropping weapons when killed on AA maps
+Fixed: spawner.scr::spawner_create using BT Parameters on AA maps
+Fixed: spawnlocations.scr::main using unfiltred mapname for starting a thread
+Fixed: spawnlocations.scr::m5l1b_update3 using local.angle that does not exist
+Fixed: parade.scr returning waitthread instead of a actual entity during coop
+Fixed: parade.scr::coop_deleteAI_far_frm_player overwriting var local.i in second loop
+Fixed: replace.scr using local.origin as var name in withinDistance
+Fixed: replace.scr using local.origin as var name in withinDistanceOf
+Fixed: cabinet.scr local.player being inizialised with NULL
+Fixed: cabinet.scr long delay for ai to start thinking
+Fixed: cornerright.scr for AI not working in BT 
+Fixed: cornerleft.scr for AI not working in BT 
+Fixed: reanimator.scr fixed bad origin reference 
+Fixed: attack.scr unarmed/holster/weaponless bug
+Fixed: coop_mod/mg42_hack.scr unarmed/holster/weaponless bug
+Fixed: cardgame.scr $player reference in ::cabinettrigger
+Fixed: cardgame.scr actor being threaded more than once
+Fixed: dialogs in human/animation/dialogue/ *.tik files
+Fixed: m1l1.scr ::killtruck, fixed Bazooka dude missing first shot
+Fixed: spawner.scr missing transfer of flags
+Fixed: parade.scr missing transfer of flags
+Fixed: spotlight.scr all known bugs and issues
+Fixed: replace.scr ::playerGlue rare crash (now forceing legstate)
+Fixed: ambient.scr changing cvar(r_gammabias) in multiplayer in func lightlevel
+Fixed: ambient.scr changing cvar(r_farplane_color) in multiplayer in func lighten
+Fixed: ambient.scr changing cvar(r_farplane_color) in multiplayer in func darken
+Fixed: anim/disguise_papers.scr possible NULL entity issue 
+Fixed: alarm_system.scr not detecting zone where the players are in (spawning enmies at wrong spot)
+Fixed: alarm_system.scr using local.self instead of self
+Fixed: g_gametypestring is now set to HZM_Coop_Mod, to avoid spaces
+Fixed: level.gametype sometimes not being set correctly, the coop mod will set this in main.scr now as well
+Fixed: autotank.scr printing out lots of status infos in coop
+Fixed: vehicles_thinkers.scr printing out lots of status infos in coop
+Fixed: m1l2b.scr Function bomb_spawn: showing developer note and spawning in sight
+Fixed: Function printInfo, printing only once in main.scr
+Fixed: Function playersWarpto, using now angle for spawnupdate in main.scr
+Fixed: Missing parameter level.coop_aaMap = 1 on several AA maps
+Fixed: Missing functions friendlythink and friendlystop for BT (e1l2) in global/friendly.scr
+Fixed: friendlydeath printing script error if self was NULL in global/friendly.scr
+Fixed: Function call to main.scr::friendlyDestination in global/friendly.scr, using main.scr::destination
+Fixed: Function friendlygen using level waittill spawn in global/friendly.scr
+Fixed: deattach Message showing in global/mg42init.scr at gunner_allow_natural_detach_thread
+Fixed: AI not using a gun after deattaching from turret in global/mg42init.scr
+Fixed: $player reference in global/mg42init.scr at gunner_think
+Fixed: global.scr/items.scr, changing g_playermodel in coop
+Fixed: global/mg42.scr::coop_mg42GetPlayerTarget extra checks for m5l2 levels
+Added: Autorestore of last used weapon for respawning player
+Added: Client reconnect feature upon server reboot
+Added: Feature to show current map picture, description and settings in scoreboard 
+Added: Feature to use coop player statefile via cvar g_statefile
+Added: Added feature to load last map after dedicated server shutdown using cvar ui_startmap
+Added: main.scr::playerGlue forcelegsstate "STAND" to prevent a possible infinite leg state loop
+Added: main.scr var level.coop_gametypeHackOn for g_gametype cvar hack
+Added: main.scr new level. vars for the new aipainhandler script
+Added: main.scr new level. vars for Last Man Standing
+Added: main.scr map restart when last player is leaving the server
+Added: main.scr Last Man Standing mode
+Added: main.scr new function reloadmap
+Added: main.scr new function playerCountChanged
+Added: main.scr new function lmsCheckLifes added
+Added: main.scr ::managePlayers added call to ::playerCountChanged
+Added: main.scr ::managePlayers added call to ::lmsCheckLifes
+Added: main.scr::managePlayers hosting player detection
+Added: main.scr::managePlayers new flag coop_joinedGameAt, to store time when player joined server
+Added: replace.scr ::player_closestTargetable
+Added: replace.scr::glueHandle forcelegsstate "STAND" to prevent a possible infinite leg state loop
+Added: replace.scr::withinDistanceOf, can now handle vector and entity in parameter1
+Added: replace.scr::tmstartloop will to stop current song before playing new song
+Added: replace.scr::solid accepts now entity and vector in parameter1
+Added: replace.scr::teleportToOnTouch accepts now entity and vector in parameter1
+Added: human/new_generic_human.tik for AI-Handler script
+Added: additional parameter to func main.scr::startThread allowing to set a activating entity for trigger starting the given thread
+Added: flag coop_physicsOff to player in replace.scr::physics_on/off 
+Added: var level.coop_physicsOff in replace.scr::physics_on/off 
+Added: var level.coop_dedicated in main.scr
+Added: check for level.coop_physicsOff in main.scr::managePlayers (setup+alive section)
+Added: m1l2b function coop_playerJustDied resetting spawn for player if stuck inside $tank02 or $truck01
+Added: m3l3.scr::main farplane_color
+Added: m3l3.scr Panzerschreck as usuable weapon
+Added: m3l3.scr Panzerschreck close to Halftrack location
+Added: m5l2a.scr detection and teleport for players and actors that are outside of the map
+Added: m5l2a machinegunners now attack also footsoldiers
+Added: m5l2a.scr::coop_teleportBrother function to make sure players do not get stuck in each other
+Added: m5l2b machinegunners now attack also footsoldiers
+Added: m5l2b.scr::coop_teleportBrother function to make sure players do not get stuck in each other
+Added: e1l1 level scripts modified for coop
+Added: e1l2 level scripts modified for coop
+Added: e1l3 level scripts modified for coop
+Added: friendlystop in global/friendly.scr
+Added: friendlythink in global/friendly.scr
+Added: all BT Primary and Secondary Weapons in main.scr
+Added: call of function coop_playerJustDied inside the main level-script when player dies in main.scr
+Added: call of function coop_playerJustRespawned inside the main level-script when player respawns in main.scr
+Added: New Function autoSpawnHost in main.scr, for more accurate auto-map-testing
+Added: New Function actorAnimationForce in replace.scr, used to force 2 followed sets of animations on a actor
+Added: New Function actorWaitForPapers in replace.scr, waiting for a player to properly present his papers to a actor
+Added: New Function stopOnTouch in replace.scr, allowing to stop ::teleportToOnTouch on a entity
+Added: New Function checkForPapers in replace.scr, checking player papers and returning the result
+Added: New Function waitForPapers in replace.scr, waiting for a player to properly present his papers to a actor
+Added: New Function missionfailed in replace.scr, failing the mission fading screen and loading the map again
+Added: New Function waitWithinDistance in replace.scr, waiting until a player is withing the given distance
+Added: New Function waitWithinDistance in replace.scr, moving players to spawn that match below/above/within/outside
+Added: New Function playerKillIf in replace.scr, moving players to spawn that match below/above/within/outside
+Added: New Function playerCatchUp in replace.scr, moving players to spawn that match below/above/within/outside
+Added: New Function specialweaponPrimary in replace.scr, allowing the player to keep a pickedup special weapon
+Added: New Function specialweaponSecondary in replace.scr, allowing the player to keep a pickedup special weapon
+Added: New Function specialInventory in replace.scr, allowing the player to keep a pickedup special item
+Added: New Function radiusFreeze/stopRadiusFreeze/freezeThisPlayer in replace.scr, used to freeze rushing players
+Added: New Function solidASAP in replace.scr, making a ai solid as soon as no player is touching it
+Added: New Function playerForceInventory in main.scr, used to force a inventory item such as papers
+Added: New Function returnVarType in main.scr, used to determine the type of a variable for Function parameter flexibility
+Added: New Function isFloat in main.scr used to determine if a given var is of the type float
+Added: New Function cleanText in main.scr used to remove a char from a string
+Added: New Function containsText in main.scr used to check if a string contains the given text
+Added: New Function spWaitForPlayer in main.scr used to signal coop mod when player is ready in sp
+Added: New Global Coop Script Variable to force a item on spawn/respawn: level.coop_forceInventory
+Added: coop_mod/butler.scr, handling cleanup and optimizing for entity managment related stuff
+Added: playerPrimarySwap Function in main.scr, Swaping the current primary weapon with a different and remembering
+Added: Function unglue in replace.scr now executing playerMakeSolidAsap for each player
+Added: Check for first BT map in Function coop_checkMaps of main.scr
+Added: Touch,ignoreme,notarget option in mom_actions.urc
+Added: Touch,ignoreme,notarget Function in mom_actions.scr
+Added: Touch,ignoreme,notarget Function in developer.scr
+Added: playerMakeSolidAsap in main.scr can now take a player-number or player-entity as parameter
+Added: playerPlaceAtSpawn in main.scr can now take a player-number or player-entity as parameter
+Added: global/reanimator.scr, is now coop compatible
+Added: global/reanimator.scr, will no longer clone NULL and NIL entities/data
+Added: global/ai.scr weapons drop check for custom missions
+Added: anim/disguise_accept.scr, modified for coop
+Added: anim/disguise_papers.scr, modified for coop
+Added: anim/disguise_salute.scr, modified for coop
+Added: anim/disguise_enemy.scr, modified for coop
+Added: anim/disguise_deny.scr, modified for coop
+Added: anim/disguise_halt.scr, modified for coop
+Added: anim/disguise_wait.scr, modified for coop
+Added: global/fakegunfire.scr, modified for coop
+Added: global/parade.scr, modified for coop
+Changed: vehicles_thinkers.scr mission failure using clientside command (not working on dedicated servers)
+Changed: Distance a player can be away during coop from a leading ai is now 500 instead of 200 in global/friendly.scr
+Changed: coop_mom.urc disabled unused buttons, changed color of developer buttons
+Changed: developer.scr developer commands require now coop_dev to be set to 1
+Changed: Function getActiveWeapon in main.scr, now using weaponcommand (Doublekill)
+Changed: Function managePlayers in main.scr, now using more reliable level.coop_dedicated
+Changed: Function fixServer in main.scr, forceing players always into spec
+Changed: Function coop_checkMaps in main.scr, now adjusting sv_maxclients if needed
+Changed: Function coop_checkMaps in main.scr, reducing wait time
+Changed: All level-scripts now wait for the HZM Coop Mod main thread to finish before continueing
+Changed: disabled printout of "Spawned ExploderChunk #" in global/exploder.scr, because it is spam
+Changed: disabled printout of "Spawned ExploderSmashed #" in global/exploder.scr, because it is spam
+Changed: disabled printout of "Spawned Exploder #" in global/exploder.scr, because it is spam
+Changed: disabled printout of "Spawned ExploderTrigger #" in global/exploder.scr, because it is spam
+Changed: disabled printout of "ManSpawnNamed::Init - guys called ? are changed to spawners" in global/ManSpawnNamed.scr
+Changed: disabled printout of "ManSpawnNamed::Spawn - guys called ? are spawned" in global/ManSpawnNamed.scr
+Changed: disabled printout of "********************** ambience.scr already run" in global/ambience.scr
+Changed: disabled printout of "Spawned interior #" in global/ambient.scr
+Changed: disabled printout of "Spawned exterior #" in global/ambient.scr
+Changed: global.scr/items.scr, replaced set_hasdisguise with has_disguise
+Changed: waitForPlayer in replace.scr, now using a trigger to manage follow calls (CL_ParseGamestate)
+Changed: waitTillPrespawn in replace.scr, now using a trigger to manage follow calls (CL_ParseGamestate)
+Changed: m1l1 updated coop_playerJustSpawned function, removed obsolete ralated funcs
+Changed: m2l3 updated coop_playerJustSpawned function, removed obsolete ralated funcs
+Changed: m3l1a updated coop_playerJustSpawned function, removed obsolete ralated funcs
+Changed: m4l3 updated coop_playerJustSpawned function, removed obsolete ralated funcs
+Changed: m4l3 weapon assignments (::player_prep)
+Changed: m6l3c updated coop_playerJustSpawned function, removed obsolete ralated funcs
+Changed: m6l3d removed coop_playerJustSpawned function
+Changed: m6l3e removed coop_playerJustSpawned function
+Changed: m1l2b setup function coop_setupStuff is now started paralell
+Changed: m1l3a player attach model now using a invisible dummy instead of the lamps
+Changed: m1l3b player attach model now using a invisible dummy instead of the lamps
+Changed: m2l2a removed test function coop_playerJustSpawned1
+Changed: m2l2a using deprecated Function set_hasdisguise, now using has_disguise in replace.scr
+Changed: m4l3 using deprecated Function set_hasdisguise, now using has_disguise in replace.scr
+Changed: m6l3e map-load entry in: level.coopNextMap, set to e1l1 (breakthrough)
+Changed: Function set_hasdisguise to has_disguise in replace.scr
+Changed: Function glue in replace.scr for singleplayer, can now handle individual spots for each player
+Changed: Function playerActives in main.scr, removed unused code
+Changed: Function fiendlyFollow in main.scr, removed unused code
+Changed: Function managePlayers in main.scr to accomedate the new special weapon/inventory feature of replace.scr
+Changed: Function unglue in replace.scr now showing player in singleplayer
+Changed: global/ai.scr replaced level waittill spawn
+Changed: global/autotank.scr replaced level.playertanktarget for e1l2 with replace.scr::player_closestTo
+Changed: printInfo in main.scr, accepting aditional parameter
+Changed: headaim.scr ::main, improved function logic
+Changed: main.scr, ::getActiveWeapon speed and load optimisation
+Attention: Precache file for e1l3 reduced, to avoid error: CL_ParseGamestate: bad command byte -1/0
+
+VERSION____________1.51
+Changed: hzm_legal.txt
+Changed: hzm_credits.txt
+Changed: hzm_changelog.txt
+Added: Known issues to hzm_install.txt
+Fixed: m1l3 attached Lamps visible at Jeep (Suxev)
+Fixed: m3l3 floating Lamp spawned from within Function scene4_panzerschreck_trigger
+Fixed: m5l1a func coop_bazookaSwitch, a typo, not switching to Heavy Weapons, added optimisations
+Fixed: m5l1b func coop_bazookaSwitch, a typo, not switching to Heavy Weapons, added optimisations
+Fixed: m6l3d and m6l3e showing spawnlocations as lamps
+Fixed: Function create_alarmguy in global/alarmer.scr printing out developer notes (Reported by Suxev)
+Fixed: Function coop_enemyAdjustificator in global/alarmer.scr erroring out using deprecated Function (Reported by Benjamin S.)
+
+VERSION____________1.50
+Fixed: coop_mod/main.scr::managePlayers - Music Command (Reported by Suxev)
+Fixed: WALK_FORWARD state in global/mike_legs.st (by 1337Smithy)
+Fixed: Lamps showing spawnpoints
+Removed: global/cardgame.scr::main command exec global/loadout.scr "maps/m5l3.scr" (by 1337Smithy)
+Removed: File network-server+client_settings.txt
+Added: global/loadout.scr made compatible to coop
+Added: coop_mod/main.scr::managePlayers - Music Volume Command
+Added: coop_mod/replace.scr::player_closestTo - Accepting now a second parameter (vector origin), voiding the first parameter
+Added: Coop compatible: global/music.scr
+Added: self alwaysdraw command in global/bomber.scr::flyplane (by 1337Smithy)
+Added: Adjustable Player Health, via cvar coop_health
+Added: hzm_changelog.txt, net_cl.cfg, net_sv.cfg
+Added: Network Setup Informations to hzm_install.txt (PlokiteWolf)

@@ -1,0 +1,64 @@
+//should be fairly minimal...handling any scripting necessary in the fight in the vineyard
+
+//============================================================================
+Init: {
+//============================================================================
+	//don't think anything needs to be initialized, but hey...
+	if (level.skipvineyard == 1) {
+	
+		if(!level.skiptown){
+			//[204] chrissstrahl
+			for(local.i=1;local.i<9;local.i++){
+				level.flags["coop_spawn"+local.i+"origin"] = ( -3100 500 0 )
+				level.flags["coop_spawn"+local.i+"angles"] = ( 0 1 0 )	
+			}
+			if($player){
+				for (local.i = 1;local.i <= $player.size;local.i++){
+					local.player =  $player[local.i]
+					if( local.player.health > 0){
+						local.player.origin = ( -3100 500 0 )
+					}
+				}
+			}
+		}
+		
+		$vineyardSpawner1 delete
+		end
+	}
+	
+	thread doWork
+}end
+
+//============================================================================
+doWork: {
+//============================================================================
+	// not even sure if there is anything that has to be done here, 
+	// but whatever
+	thread keepVineyardGuysStanding
+}end
+
+//============================================================================
+keepVineyardGuysStanding: {
+//============================================================================
+	local.trigger = waitthread global/FindTrigger.scr::FindTrigger "vineyardSpawner1"
+	local.trigger waittill trigger
+
+	while (1) {
+		wait 1.0
+
+		if ($vineyardDorks1) {
+			$vineyardDorks1 thread standUp
+		}
+
+		if ($vineyardDorks2) {
+			$vineyardDorks2 thread standUp
+		}
+	}
+}end
+
+//============================================================================
+standUp: {
+//============================================================================
+	self.ainocrouch = 1
+	self.ainoprone = 1
+}end

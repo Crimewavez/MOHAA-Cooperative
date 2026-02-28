@@ -1,0 +1,397 @@
+// Town
+
+//============================================================================
+Init: {
+//============================================================================
+	if (level.skiptown == 1) {
+		//[204] chrissstrahl
+		if(level.gametype == 0){
+			$player.origin = ( 4500 -50 0 )
+		}else{
+			//[204] chrissstrahl - make spawnlocation update as soon as players are close in the house
+			level.flags[coop_spawn1angles] = ( 0 180.313 0 ) 
+				
+			level.flags[coop_spawn1angles] = ( 0 9.207 0 ) 
+			level.flags[coop_spawn1origin] = ( 536 38 -445 ) 
+			level.flags[coop_spawn2origin] = ( 576 18 -445 ) 
+			level.flags[coop_spawn3origin] = ( 576 58 -445 ) 
+			level.flags[coop_spawn4origin] = ( 616 -21 -445 ) 
+			level.flags[coop_spawn5origin] = ( 616 18 -445 ) 
+			level.flags[coop_spawn6origin] = ( 616 58 -445 ) 
+			level.flags[coop_spawn7origin] = ( 656 18 -445 ) 
+			level.flags[coop_spawn8origin] = ( 656 58 -445 ) 
+		}
+		
+		//[204] chrissstrahl - spawn tank
+		//local.tankOrigin = "616 -152 -440"
+		local.tankOrigin = "560 -136 -440"
+		local.tank = spawn script_model "model" "models/vehicles/It_V_CarroP40_Des.tik" "origin" local.tankOrigin "targetname" "townDestTank" "angle" "180"
+		local.tank notsolid
+		
+		//[204] chrissstrahl - spawn trooper
+		if ($ParatrooperLeader == NIL || $ParatrooperLeader == NULL) {
+			local.model = spawn models/human/Sc_Al_US_InfWPack.tik
+			local.model.targetname = "ParatrooperLeader"
+			local.model ai_on
+			local.model physics_on
+			local.model.origin = ( 672 -416 -336 )
+			local.model thread maps/e2l3/JohnsonThinker.scr::Think
+		}
+		
+		
+		waitthread global/ObjMgr.scr::CompleteObj "clearTown"
+		end
+	}
+
+	if (level.skipairdrop == 1) {
+		if ($ParatrooperLeader == NIL || $ParatrooperLeader == NULL) {
+			local.model = spawn models/human/Sc_Al_US_InfWPack.tik
+			local.model.targetname = "ParatrooperLeader"
+			local.model ai_on
+			local.model physics_on
+			local.model.origin = $c47_dude1.origin
+			local.model thread maps/e2l3/JohnsonThinker.scr::Think
+		}
+	}
+
+	level.town_guys = 1
+	level.town_done = 0
+	$wineHouseEntrance nottriggerable
+	$wineHouseExit nottriggerable
+	$deCanonDaJa nodamage
+	$deCanonDaJa thread cannonThink
+
+	thread DoWork
+}end
+
+//============================================================================
+DoWork: {
+//============================================================================
+	$townTrigger waittill trigger
+	thread InitTank
+}end
+
+//============================================================================
+InitTank: {
+//============================================================================
+	local.trigger = waitthread global/FindTrigger.scr::FindTrigger "townTank"
+	local.trigger waittill trigger
+
+	while ($townTank == NIL || $townTank == NULL) {
+		wait 0.5
+	}
+
+	$townTank.sighttrace = 0
+	$townTank thread tankThink
+}end
+
+//============================================================================
+tankThink: {
+//============================================================================
+	local.invisibletarget = self thread createInvisibleTarget
+
+	// Give this tank a slow turret turning speed
+	local.gun = self QueryTurretSlotEntity 0
+	local.gun turnSpeed 20
+	self projectilevulnerable 2
+
+	waitthread global/ObjMgr.scr::SetObjCompassTarg "clearTown" $deCanonDaJa
+	self.inTown = 1
+
+	local.targets = self waitthread allocateTankEnemies
+
+
+	//[204]chrissstrahl
+	local.player = NULL
+
+	while (self != NULL && self.health > 0) {
+		self.myenemy = NULL
+		local.p1 = self.origin + ( 0 0 200 )
+
+		for (local.i = 1; local.i <= local.targets.size; local.i++) {
+			local.ptarget = local.targets[local.i]
+			if (local.ptarget == NULL) {
+				continue
+			}
+
+			if (local.ptarget.health < 1) {
+				continue
+			}
+
+			local.p2 = local.ptarget.origin + ( 0 0 94 )
+			local.canSeePTarget = sighttrace local.p2 local.p1 1
+			if (local.canSeePTarget == 0){
+				continue
+			}
+			self.myenemy = local.ptarget
+			break
+		}
+
+		if (self.myenemy == NULL) {
+			//[204]chrissstrahl - repeat until we can actually grab any player (otherwise the server is empty)
+			while(self && !$player){
+				wait 1
+			}
+			
+			if(level.gametype == 0){
+				local.player = $player
+			}else{
+				//[204]chrissstrahl - grab closest player
+				local.player = waitthread coop_mod/replace.scr::canseeGetClosest NIL NIL
+				//[204]chrissstrahl - if no valid player, grab closest, regardless if tank can actually see player
+				while(!local.player && self){
+					waitframe
+					local.player = waitthread coop_mod/replace.scr::player_closestTo self
+				}
+			}
+		
+			local.p2 = local.player.origin + ( 0 0 94 )
+
+			// 50/50 chance to attack player (if we can see him)
+			local.canSeePlayer = sighttrace local.p1 local.p2 1
+			if (local.canSeePlayer) {
+				self.myenemy = local.player
+			}
+		}
+
+		// Wait 5 seconds to switch targets, or instantly if target dies
+		local.count = 50
+		if (self.myenemy == NULL) { 
+			// if we have no target, attack player, but reconsider in 1 second
+			self.myenemy = local.player	//[204]chrissstrahl
+			local.count = 10
+		}
+
+		self waitthread global/autotank.scr::AimAt self.myenemy 1
+		while (self != NULL && local.count > 0 && self.myenemy != NULL && self.myenemy.health > 0) {
+			wait 0.1
+			local.count--
+		}
+		wait 0.1
+	}
+
+	local.invisibletarget delete
+	$wineHouseEntrance thread waitForWineHouseEntrance
+	waitthread global/ObjMgr.scr::SetObjCompassTarg "clearTown" $wineHouseEntrance
+}end
+
+
+//============================================================================
+allocateTankEnemies: {
+//============================================================================
+	local.t = 1
+
+	for (local.i = 1; local.i < 1024; local.i++) {
+		local.ptarget = getentbyentnum local.i
+		if (local.ptarget == NULL){
+			continue
+		}
+
+		if (local.ptarget.classname != "Actor") {
+			continue
+		}
+
+		if (local.ptarget.team != "american") {
+			continue
+		}
+
+		if (local.ptarget.health < 1) {
+			continue
+		}
+
+		if (local.ptarget.targetname == NIL) {
+			continue
+		}
+
+		if (local.ptarget.targetname == NULL) {
+			continue
+		}
+
+		if (local.ptarget.targetname == "") {
+			continue
+		}
+
+		// we can't expose the leader for being Clark Kent
+		if (local.ptarget.targetname == "ParatrooperLeader") {
+			continue
+		}
+		local.retVal[local.t] = local.ptarget
+		local.t++
+	}
+}end local.retVal
+
+//============================================================================
+waitForWineHouseEntrance: {
+//============================================================================
+	self triggerable
+	self waittill trigger
+	$wineHouseExit thread waitForWineHouseExit
+	waitthread global/ObjMgr.scr::SetObjCompassTarg "clearTown" $wineHouseExit
+}end
+
+//============================================================================
+waitForWineHouseExit: {
+//============================================================================
+	self triggerable
+	self waittill trigger
+	waitthread global/ObjMgr.scr::SetObjCompassTarg "clearTown" $mortarWest
+}end
+
+//============================================================================
+createInvisibleTarget: {
+//============================================================================
+	local.invisibleTarget = spawn models/human/Sc_AX_Ital_Inf.tik
+	local.invisibleTarget hide
+	local.invisibleTarget nodamage
+	local.invisibleTarget health 1000
+	local.invisibleTarget notsolid
+	local.invisibleTarget threatbias 50
+	local.invisibleTarget.origin = self.origin + self.getmaxs + self.getmins
+	local.forward = angles_toforward self.angles
+	local.invisibleTarget.origin += vector_scale local.forward 150
+	local.invisibleTarget bind self
+	local.invisibleTarget physics_off
+	local.invisibleTarget waitexec global/disable_ai.scr
+}end local.invisibleTarget
+
+//==========================================================[204] chrissstrahl
+cannonThink: {
+//============================================================================
+	self lock
+	local.backward  = -1 * angles_toforward self.angles 
+	
+	//PLAYER reference
+	local.player = NULL
+	
+	//cannon thinking
+	while(self){
+
+		//wait for any player to exist and getting close
+		while(self){
+			//iprintlnbold_noloc	"::cannonThink - waiting for player"
+		
+			//get closest valid player
+			local.player = waitthread coop_mod/replace.scr::player_closestTo self
+			
+			//check if the closest player is within range
+			if(local.player){
+				if(vector_length( local.player.origin - self.origin ) < 200 ){
+					break
+				}
+			}
+			
+			wait .25
+		}
+		
+		//a player is in range
+		//iprintlnbold_noloc	"::cannonThink - a player is in range"
+		
+		//wait until any player that is in range and valid
+		local.playerSelected = NULL
+		while(self && local.playerSelected == NULL){
+			waitframe
+		
+			//check for each player
+			for (local.i = 1;local.i <= $player.size;local.i++){
+				local.player = $player[local.i]
+				//only check alive player
+				if(local.player.health > 0){
+					//in coop skip invalid player
+					if(level.gametype != 0){
+						if(local.player.dmteam == "spectator" || local.player.flags["coop_isActive"] != 1 && local.player.flags["coopDevNoclip"] != NIL){
+							continue
+						}
+					}
+					//check distance to player
+					if(vector_length (local.player.origin - self.origin) < 200){
+						//check if player is pressing use
+						if(local.player.useheld) {
+							//check if player is actually behind the cannon
+							local.vObjDir = vector_subtract local.player.origin self.origin
+							local.vObjDir = vector_normalize local.vObjDir
+							local.dot = vector_dot local.vObjDir local.backward
+							if (local.dot > .707) {
+								//set player for the next code
+								local.playerSelected = local.player
+								
+								//iprintlnbold_noloc	"::cannonThink - player using cannon"
+								
+								//stop itterating the FOR-Loop
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+		
+		//if the cannon is gone, end it here
+		if(!self){ end }
+		
+		//the selected player is now made using the cannon
+		self unlock
+		self doUse local.playerSelected
+		self lock
+		
+		//wait before accepting any kind of input again
+		wait .25
+		
+		//iprintlnbold_noloc	"::cannonThink - ready again for input"
+		
+		//wait until the selected player presses use again or otherwhise becomes invalid
+		while (self){
+			waitframe
+			
+			//player left the server or died or moved somehow out of range
+			if(!local.playerSelected || local.playerSelected.health <= 0 || vector_length (local.player.origin - self.origin) > 200){
+				//iprintlnbold_noloc	"::cannonThink - player NULL or DEAD or OUTofRANGE"
+				break
+			}
+			//in coop check other invalidating factors
+			if(level.gametype != 0){
+				if(local.player.dmteam == "spectator" || local.player.flags["coop_isActive"] != 1 && local.player.flags["coopDevNoclip"] != NIL){
+					//iprintlnbold_noloc	"::cannonThink - player became invalid"
+					break
+				}
+			}
+			//check if player wants to exit by pressing use
+			if(local.playerSelected.useheld){
+				//iprintlnbold_noloc	"::cannonThink - player pressing use to exit"
+				break
+			}
+		}
+		
+		//if the cannon is gone, end it here
+		if(!self){ end }
+		
+		self unlock
+		
+		//check if player still exists, then exit from cannon
+		if(local.playerSelected){
+			if(local.playerSelected.health > 0){
+				
+			
+				if(level.gametype == 0 || local.player.dmteam != "spectator"){
+					//make player use cannon again to exit it
+					self doUse local.playerSelected
+					
+					//iprintlnbold_noloc	"::cannonThink - player exit and present (doing use with self)"
+				}
+				
+				//reset view direction of player
+				local.playerSelected.viewangles = "0 0 0"
+			}
+			//make sure player respawns NOT inside the cannon
+			else{
+				//iprintlnbold_noloc	"::cannonThink - player respawn loc altered"
+				local.player.flags["coop_respawnTime"]		= (level.time - 2)
+				local.player.flags["coop_respawnOrigin"]	= ( -1830 -800 -140 )
+				local.player.flags["coop_respawnAngle"]		= -7
+			}
+		}
+		
+		self lock
+		
+		wait .25
+	}
+}end

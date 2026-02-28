@@ -1,0 +1,12 @@
+Extra Callvote Options for MOHAA Cooperative (maintt)
+
+
+//Allow more and Coop specific vote options
+//=========================================
+zzzzzz_co-op_mohaa_coop_callvote.pk3
+
+
+//Allow Callvote to also quit the server
+//depends on the above pk3 to be also in maintt folder
+//=========================================
+zzzzzz_co-op_mohaa_coop_callvote_quit.pk3

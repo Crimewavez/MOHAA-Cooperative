@@ -1,0 +1,63 @@
+//[203] Smithy - we can use this for sound related code
+//e.g. define time (in seconds) of all sound aliases (as defined in ubersound and uberdialog) that were originally added to sounddone event.
+//plus some we need for waittill saydone (when no anim is present)
+start:	
+	waitthread initLanguage
+	waitthread initAllSoundLengths
+end
+
+initLanguage:
+	//const
+	//offset the length of each sound by this amount. seems sounddone event takes a bit longer than the actual length of a sound
+	//not to be confused with the offset for different languages if we decide to include that later
+	level.coop_SOUND_LEN_DONE_OFFSET = 1.25
+
+	level.coop_STR_LANG["english"] = "eng" //store const for ease of recovery (and if we ever change it in future)
+	
+	level.coop_language = level.coop_STR_LANG["english"] //maybe we can discern this from cvar at some point?
+end
+
+//syntax: level.coop_soundLength[language][sound_alias]
+initAllSoundLengths:
+	waitthread initEnglishSoundLengths
+end
+
+
+initEnglishSoundLengths:
+	local.lang = level.coop_STR_LANG["english"]
+	
+	//briefing1.scr
+	level.coop_soundLength[local.lang]["mb_101"] = 15
+	level.coop_soundLength[local.lang]["mb_103"] = 28
+	level.coop_soundLength[local.lang]["mb_104"] = 13
+	level.coop_soundLength[local.lang]["mb_106"] = 10
+	
+	//briefing2.scr
+	level.coop_soundLength[local.lang]["mb_204"] = 13
+	level.coop_soundLength[local.lang]["mb_205"] = 15
+	
+	//briefing3.scr
+	level.coop_soundLength[local.lang]["mb_303"] = 17
+	level.coop_soundLength[local.lang]["mb_304"] = 15
+	level.coop_soundLength[local.lang]["mb_305"] = 25 //mb_305 actually points to the sound file mb_309 (lol, i know...)
+	
+	//briefing4.scr
+	level.coop_soundLength[local.lang]["mb_404"] = 24
+	level.coop_soundLength[local.lang]["mb_405"] = 4
+	
+	//briefing5.scr
+	level.coop_soundLength[local.lang]["mb_502"] = 15
+	level.coop_soundLength[local.lang]["mb_503"] = 29
+	level.coop_soundLength[local.lang]["mb_504"] = 27
+	
+	//briefing6.scr
+	level.coop_soundLength[local.lang]["mb_602"] = 15
+	level.coop_soundLength[local.lang]["mb_604"] = 2
+	
+	//[205] chrissstrahl - added sounds that do spam a lot
+	if(	level.script == "maps/m3l1a.scr" ||
+		level.script == "maps/m3l1b.scr")
+	{
+		level.coop_soundLength[local.lang]["arty_leadin"] = 1
+	}
+end

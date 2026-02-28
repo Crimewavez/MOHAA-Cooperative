@@ -1,0 +1,25 @@
+///////////////////////Textures to replace so it can be opened in the Überradiant for EF2
+
+special/hint
+common/hint
+
+special/sky
+common/sky
+
+//common/bspindleclip
+//common/hint
+
+common/vis
+common/hint
+
+common/foliageclip
+common/clip
+
+common/obscure_bush
+common/hint
+
+common/playerclip
+common/moveclip
+
+ep2sky/e2l1sky
+common/sky

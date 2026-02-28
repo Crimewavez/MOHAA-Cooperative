@@ -1,0 +1,302 @@
+//////////////////////////////////////////////
+// started by chrissstrahl on 2020.10.16 ([202])
+// 
+// Contains server related functions
+//
+//////////////////////////////////////////////
+
+//			NEEDS TO HAVE variables.scr::main ALREADY EXECUTED
+
+//This is executed at the erliest stage from main.scr::main
+//does set up the srever for coop usage
+//=========================================================================
+main:{
+//=========================================================================
+if(level.cMTE_coop_server){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread server/main->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	//[201] chrissstrahl - reset last saved status if the map has changed
+	if( level.coop_mapname != getCvar("coop_prevMap")){ setcvar coop_save "" }
+	
+	//[201] chrissstrahl - set this map as previouse loadad
+	setcvar coop_prevMap level.coop_mapname
+	
+	//[200] Smithy - use different state files for coop
+	setcvar "g_statefile" "coop_mod/player"
+	
+	//[200] chrissstrahl - just to be sure this works
+	setcvar "g_gametypestring" "Cooperative"
+	
+	//[200] Smithy - setup the scoreboard for this mission
+	thread setScoreboard
+	
+	//[200] Smithy - reset sv_maplist	
+	thread resetMapList
+
+	//[200] Smithy
+	//[203] Smithy - don't attempt to restart map
+	//commenting this out should fix weapon loadout bug when server is in g_gametype 1
+	//which itself isn't really necessary to fix, but could sort other issues too
+	//if (level.coop_dedicated){
+		//if (level.gametype != 2){
+		//	println "(coop_mod/main.scr::setupServer): ERROR: Gametype is " level.gametype " on dedicated server!" // Restarting..."
+		//	thread coop_mod/main.scr::restartMap
+		//}
+	//}else{
+		if (level.gametype != 2){
+			//do we want to error out instead???
+			println "(coop_mod/main.scr::setupServer): Warning: Gametype is " level.gametype " on map load!"
+		}
+	//}
+
+	//[200] chrissstrahl - check if map-check should be done - moved here, moved here because of events system
+	//[200] chrissstrahl - added updateServer to handle server settings changes
+	waitthread coop_checkMaps			
+	thread updateServer	
+}end
+
+//[200] Smithy - stop any previously loaded scoreboard data persisting on coop maps
+// Used to show details of current mission
+//=========================================================================
+setScoreboard:{
+//=========================================================================
+if(level.cMTE_coop_server){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread server/setScoreboard->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	//[202] chrissstrahl - have some delay here
+	//we are not in rush to have this updated other data has priority
+	//assume that after 1 or 1 secs on the server the majority of data has been exchanged between server and client
+	//also keep in mind that level.coop_mapDescription is inizialised with a delay in variables.scr
+	wait 1
+
+	setcvar "g_scoreboardpic" ("textures/mohmenu/dmloading/" + level.coop_mapname) //[200] chrissstrahl - added mappic as suggested
+	
+	//[200] Smithy - moves sub-name onto new line, uses one loop
+	local.mapDesc 	= level.coop_mapDescription[level.coop_mapname]	
+	local.maxChars 	= 24
+	local.descSize 	= local.mapDesc.size
+	local.line 		= 0
+	local.j 		= 0
+	local.subspace 	= 0
+
+	local.desc[0] = ""; local.desc[1] = ""; local.desc[2] = ""
+
+	for (local.i = 0; local.i <= (local.descSize - 1); local.i++){
+		if (local.mapDesc[local.j] == " " && local.mapDesc[local.j + 1] == "-"){ //put sub-name on new line
+			local.i = 0; local.j += 3; local.line++; local.subspace += 3			
+		}
+		local.desc[local.line] += local.mapDesc[local.j]
+		local.j++
+		if (local.descSize == ((local.desc[0] + local.desc[1] + local.desc[2]).size + local.subspace)){
+			break 
+		}	
+		if (local.i == local.maxChars){
+			local.i = 0
+			local.line++
+		}	
+	}	
+
+	setcvar "g_obj_alliedtext1" local.desc[0]
+	setcvar "g_obj_alliedtext2" local.desc[1]
+	setcvar "g_obj_alliedtext3" local.desc[2]
+	setcvar "g_obj_axistext1" ""
+	setcvar "g_obj_axistext2" ""
+	//[200] chrissstrahl - add info to score hud	
+	setcvar "g_obj_axistext3" "MOHAA Cooperative"
+}end
+
+
+//[200] Smithy - restore a maplist if there is one
+//this allows us to clear it on coop mission transition to stop mp maps
+//being loaded by engine
+//=========================================================================
+resetMapList:{
+//=========================================================================
+if(level.cMTE_coop_server){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread server/resetMapList->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if (level.coop_dedicated && level.coop_cvars["coop_prevMapList"]){
+		setcvar "coop_prevMapList" ""
+		setcvar "sv_maplist" level.coop_cvars["coop_prevMapList"]
+	}else if (!level.coop_dedicated){ //[200] Smithy - if it's a listen server, we don't need a maplist
+		setcvar "sv_maplist" "" 
+	}
+}end
+
+//loads next map until check is over or starting maps are reached
+//this is used for unattended level loading and testing of the scripts
+//this sometimes does not work as intended because of game limitations
+//this is how ever much more comfortable than manual handling
+//=========================================================================
+coop_checkMaps:{
+//=========================================================================
+if(level.cMTE_coop_server){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread server/coop_checkMaps->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	if((int(getcvar("coop_dev")) == 1) && (int(getcvar("coop_diag")) == 1)){ //[200] chrissstrahl - changed to coop_diag cuz other coop mod also uses same cvar
+		//[200] chrissstrahl - make sure we have at least two clients so it does not wait for player ready in loadingscreen
+		if(int(getcvar("sv_maxclients")) < 2){
+			setcvar "sv_maxclients" 2
+		}
+
+		//[200] chrissstrahl - if we come full circle we can stop
+		if( level.coopNextMap == "training" ){
+			setcvar "timescale" 1 //[200] chrissstrahl - restore timescale
+			setcvar "coop_diag" "0"
+			println("Coop Map Check is completed!!!")
+			end
+		}
+		println("Coop Map Check is active!!! next map: '"+level.coopNextMap+"'")
+		setcvar "timescale" 3 //[200] chrissstrahl - speedup testing
+		local.waittime = 5 //[200] chrissstrahl - reduced the time from 10 to 5
+		for(local.i=local.waittime;local.i > 0;local.i--){
+			iprintlnbold_noloc("Coop Map Check is active, loading next map in: "+local.i)
+			wait 1
+
+			//[200] chrissstrahl - make player autospawn
+			if(local.waittime == local.i){
+				thread coop_mod/main.scr::autoSpawnHost
+			}
+		}
+		setcvar "timescale" 10 //[200] chrissstrahl - speedup testing
+
+		exec global/missioncomplete.scr level.coopNextMap
+	}
+}end
+
+//[202] chrissstrahl - changed to wait for playerspawn
+//[200] chrissstrahl - checks for changes every secound
+//=========================================================================
+updateServer:{
+//=========================================================================
+if(level.cMTE_coop_server){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread server/updateServer->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.serverWasPopulated=0
+	updateServer_start:
+	while($player){
+		wait 1
+		waitthread checkForVote
+		waitthread checkScoreboard
+		waitthread checkCvars
+		local.serverWasPopulated = 1
+	}
+	
+	//[202] chrisstrahl - kills server after players left
+	if(local.serverWasPopulated){
+		thread rebootServer
+	}
+	
+	level waittill playerspawn
+	
+	goto updateServer_start
+}end
+
+
+//[202] chrissstrahl - ends server after some time if coop_reboot is set
+//this way our test server can reboot and save the logfile
+//this prevents the logfiles from eggting to big if there are errors
+//occuring once the players left. The logs are archived.
+//=========================================================================
+rebootServer:{
+//=========================================================================
+	local.rebootTime = int(getCvar("coop_reboot"))
+	if!(local.rebootTime){ end }
+	
+	local.timeWaiting=1
+	while(local.rebootTime > local.timeWaiting){
+		wait 1
+		local.timeWaiting++
+		if($player){ end }
+	}
+	println("Server shutting down after "+local.timeWaiting+" sec of being empty.")
+	waitframe
+	setCvar "sv_killserver" "1"
+}end
+
+//[200] chrissstrahl - checks if something changed that needs to be shown in the scoreboard
+//=========================================================================
+checkScoreboard:{
+//=========================================================================
+if(level.cMTE_coop_server){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread server/checkScoreboard->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.cvardata = int(getcvar("coop_health"))
+	if(NIL == level.prevCoopHealth || level.coop_health == NIL || level.coop_health != level.prevCoopHealth || local.cvardata > 0 && level.prevCoopHealth != local.cvardata){
+		if(local.cvardata > 0){
+			level.coop_health = local.cvardata
+		}else{
+			level.coop_health = 750
+		}
+		level.prevCoopHealth = level.coop_health
+		setcvar "g_obj_axistext1" ("Health: "+level.prevCoopHealth)
+	}
+	
+	local.cvardata = int(getcvar("coop_lmsLives")) //[201] chrissstrahl - changed cvar from coop_lmsLives to coop_lmsLives
+	if(NIL == level.prevCoopLmsLives || level.prevCoopLmsLives != local.cvardata){ //[201] chrissstrahl - fixed typo
+		level.prevCoopLmsLives = local.cvardata
+		setcvar "g_obj_axistext2" ("LMS-Lives: "+level.prevCoopLmsLives)
+	}
+}end
+
+//[202][hotfix] chrissstrahl - check for certain cvars changing
+//=========================================================================
+checkCvars:{
+//=========================================================================
+if(level.cMTE_coop_server){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread server/checkCvars->"+level.cMTE+"" )}
+	local.coop_cvarRespawnDisable = int(getcvar("coop_disRespawnWarp"))
+	
+	if(local.coop_cvarRespawnDisable != level.coop_cvarRespawnDisable){
+		level.coop_cvarRespawnDisable = local.coop_cvarRespawnDisable
+		
+		for (local.i = 1; local.i <= $player.size; local.i++){
+			$player[local.i].flags["coop_respawnTime"] = -1 //make sure it will be updated righ away
+		}
+	}
+}end
+
+//[200] chrissstrahl - checks if change has been requested via vote
+//=========================================================================
+checkForVote:{
+//=========================================================================
+if(level.cMTE_coop_server){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread server/checkForVote->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	local.cvarValue = getCvar("coop_callvote")
+	if(local.cvarValue == ""){ end }
+	
+	setCvar "coop_callvote" ""
+	
+	if(local.cvarValue == "nextmap"){
+		exec global/missioncomplete.scr level.coopNextMap 1
+	}
+	else if(local.cvarValue == "previousemap"){
+		exec global/missioncomplete.scr level.coopPrevMap 1
+	}
+	else if(local.cvarValue == "restartmap"){
+		thread coop_mod/main.scr::restartMap
+	}
+}end
+
+//@smithy are we still using this ?
+//=========================================================================
+fixServer:{
+//=========================================================================
+if(level.cMTE_coop_server){if(!level.cMTE){level.cMTE=0}; level.cMTE++; println( "-#-#- thread server/fixServer->"+level.cMTE+"" )} //[202] chrissstrahl - this is to debug the coop mod thread handling
+	wait 3
+	for(local.count=0;local.count<8;local.count++){
+		iprintlnbold_noloc ( "=*= BAD SERVER SETTINGS, reloading map =*=" )
+		wait 1
+	}
+
+	setcvar "ui_team_spawn_interval" 0 //local server
+	setcvar "sv_team_spawn_interval" 0
+
+	setcvar "g_gametype" 2
+	setcvar "maxentities" 2048
+	setcvar "timelimit" 0
+	setcvar "fraglimit" 0
+	setcvar "roundlimit" 0
+
+	iprintlnbold_noloc ( "=*= LOADING MAP NOW =*=" )
+	wait 1
+
+	//@smithy - didn't you solve this issue elsewhere or is this still needed ?
+	//force all players into spec to prevent players being in a team when the map is reloaded
+	for (local.i = 1;local.i <= $player.size;local.i++){
+		local.player = $player[local.i]
+		//[200] chrissstrahl - move into spec, just to be sure it registers right
+		local.player join_team ( "spectator" )
+	}
+	waitframe
+
+	//this is a ugly way to do this, but the best result so far
+	thread loadMap level.coop_mapname game.false
+}end
+
