@@ -1,6 +1,6 @@
 # MOHAA Cooperative
 
-[![Discord](https://img.shields.io/discord/1344795200907403335?logo=discord&label=Discord&color=5865F2)](https://discord.gg/SA2scfnXUJ)
+[![Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2?logo=discord&logoColor=white)](https://discord.gg/SA2scfnXUJ)
 
 A cooperative gameplay mod for Medal of Honor: Allied Assault and OpenMOHAA.
 
